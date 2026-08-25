@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in — SGS Portal</title>
+
+    <!-- Global site theme (SGS brand tokens live in :root here) -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="img/favicon.ico">
+    <link rel="icon" type="image/png" sizes="256x256" href="img/favicon-256.png">
+    <link rel="apple-touch-icon" href="img/favicon-256.png">
+
+    <!-- Roboto (SGS brand font) + Font Awesome icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* ===========================================================
+           SGS-brand login. Two-panel layout:
+             LEFT  — dark SGS panel over an industrial photo. Below the
+                     "Portal" heading, a fixed SGS tagline + a cycling
+                     phrase that types and erases through service lines.
+             RIGHT — white form card.
+           Brand rule: orange used on the cycling phrase + Sign In button.
+           =========================================================== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            font-family: 'Roboto', 'Helvetica Neue', 'Univers', Arial, sans-serif;
+            color: #252525;
+            background: #ffffff;
+            display: flex;
+            flex-direction: row;
+        }
+
+        /* ============ LEFT BRAND PANEL ============ */
+        .login-brand {
+            flex: 1;
+            background:
+                linear-gradient(160deg, rgba(60, 81, 91, 0.92) 0%, rgba(30, 40, 47, 0.96) 100%),
+                url('img/login-bg.jpg') center/cover no-repeat;
+            color: white;
+            padding: 3rem;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Large cycling phrase under the Portal heading. */
+        .tagline-block {
+            margin-top: 0;
+            margin-bottom: 2.5rem;
+            min-height: 2em;
+        }
+        .tagline-block .tag-cycle {
+            display: inline-block;
+            color: #ff6600;
+            font-weight: 700;
+            font-size: 1.5rem;
+            line-height: 1.25;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: clip;
+            max-width: 100%;
+        }
+        .tagline-block .tag-cycle::after {
+            content: '';
+            display: inline-block;
+            width: 3px;
+            height: 1em;
+            background: #ff6600;
+            margin-left: 5px;
+            vertical-align: -0.15em;
+            animation: caretBlink 1s steps(1) infinite;
+        }
+
+        /* SGS official tagline pinned at the bottom of the brand panel. */
+        .brand-tagline {
+            position: absolute;
+            bottom: 2rem;
+            left: 3rem;
+            right: 3rem;
+            margin: 0 auto;
+            max-width: 560px;
+            z-index: 2;
+            font-size: 1rem;
+            font-weight: 500;
+            font-style: italic;
+            color: rgba(255,255,255,0.78);
+            letter-spacing: 0.04em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+        }
+        .brand-tagline .tag-line {
+            flex: 1;
+            height: 1px;
+            background: rgba(255,255,255,0.25);
+        }
+        .brand-tagline .tag-word {
+            color: white;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .brand-tagline .tag-word .accent {
+            color: #ff6600;
+            font-style: normal;
+            font-weight: 700;
+        }
+        @keyframes caretBlink {
+            0%, 49%   { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .tagline-block .tag-cycle::after { animation: none; opacity: 1; }
+        }
+
+        /* Thin orange band at the left edge — echoes the SGS logo frame. */
+        .login-brand::before {
+            content: '';
+            position: absolute;
+            top: 0; bottom: 0; left: 0;
+            width: 5px;
+            background: #ff6600;
+            z-index: 3;
+        }
+
+        .brand-content {
+            position: relative;
+            z-index: 2;
+            max-width: 560px;
+            width: 100%;
+            text-align: left;
+        }
+
+        .brand-logo {
+            display: flex;
+            justify-content: flex-start;
+            margin-left: -22px;
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+            transform: translateY(-2rem);
+        }
+
+        .brand-logo img {
+            display: block;
+            height: 150px;
+            width: auto;
+        }
+
+        .brand-content h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            margin-bottom: 1.25rem;
+            color: white;
+        }
+
+        .brand-features {
+            display: flex;
+            flex-direction: column;
+            gap: 1.15rem;
+        }
+
+        .brand-feature {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.92);
+        }
+
+        .brand-feature .feature-ico {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: rgba(255, 102, 0, 0.15);
+            border: 1px solid rgba(255, 102, 0, 0.35);
+            color: #ff6600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+        }
+
+        /* ============ RIGHT FORM PANEL ============ */
+        .login-form-panel {
+            width: 520px;
+            min-width: 420px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 3.5rem 4rem;
+            background: white;
+        }
+
+        .form-header { margin-bottom: 2rem; }
+
+        .form-header h2 {
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: #3c515b;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.01em;
+        }
+
+        .form-header p {
+            font-size: 0.9rem;
+            color: #738289;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.1rem;
+        }
+
+        .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+
+        .form-group label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #3c515b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 0.95rem;
+            color: #738289;
+            font-size: 0.95rem;
+            pointer-events: none;
+            transition: color 0.15s;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.85rem 0.95rem 0.85rem 2.7rem;
+            border: 1.5px solid #eceeef;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            color: #252525;
+            background: #f6f9fc;
+            transition: all 0.15s ease;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: #ff6600;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(255, 102, 0, 0.12);
+        }
+
+        .form-group:focus-within .input-icon { color: #ff6600; }
+        .form-group input::placeholder { color: #a8b3b8; }
+
+        .password-toggle {
+            position: absolute;
+            right: 0.9rem;
+            background: none;
+            border: none;
+            color: #738289;
+            cursor: pointer;
+            padding: 0.25rem;
+            font-size: 0.95rem;
+            transition: color 0.15s;
+        }
+        .password-toggle:hover { color: #3c515b; }
+
+        .btn-login {
+            width: 100%;
+            padding: 0.9rem;
+            background: #ff6600;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            box-shadow: 0 4px 14px rgba(255, 102, 0, 0.30);
+            font-family: inherit;
+        }
+
+        .btn-login:hover {
+            background: #e65a00;
+            box-shadow: 0 8px 24px rgba(255, 102, 0, 0.40);
+            transform: translateY(-1px);
+        }
+        .btn-login:active { transform: translateY(0); }
+
+        .login-footer {
+            margin-top: 1.75rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #eceeef;
+            text-align: center;
+        }
+
+        .login-help {
+            font-size: 0.825rem;
+            color: #738289;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .login-help i { color: #ff6600; }
+
+        /* ============ FLASH / ALERTS ============ */
+        .flash-messages {
+            position: fixed;
+            top: 1.5rem;
+            right: 1.5rem;
+            z-index: 1000;
+            max-width: 380px;
+        }
+
+        .alert {
+            padding: 0.85rem 1.15rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-size: 0.85rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to   { transform: translateX(0); opacity: 1; }
+        }
+        .alert-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+
+        /* ============ RESPONSIVE ============ */
+        @media (max-width: 900px) {
+            body { flex-direction: column; }
+            .login-brand {
+                flex: none;
+                padding: 2.5rem 1.75rem 3rem;
+                min-height: auto;
+            }
+            .brand-content { max-width: 100%; }
+            .brand-logo { justify-content: center; margin: 0 auto 1.5rem; }
+            .brand-logo img { height: 72px; }
+            .brand-content h1 { font-size: 1.65rem; text-align: center; }
+            .tagline-block { text-align: center; max-width: 380px; margin: 0.5rem auto 1.5rem; min-height: 4em; }
+            .tagline-block .tag-cycle { font-size: 1.25rem; }
+            .brand-features { max-width: 320px; margin: 0 auto; }
+            .brand-tagline { display: none; }
+            .login-form-panel {
+                width: 100%;
+                min-width: unset;
+                padding: 2rem 1.5rem;
+            }
+            .flash-messages { right: 1rem; left: 1rem; max-width: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- ============================================================
+         FLASH / ALERT MESSAGES
+         Render server-side error/success messages here. Example markup
+         (show conditionally from your backend / framework):
+
+         <div class="flash-messages">
+             <div class="alert alert-danger">
+                 <i class="fas fa-exclamation-circle"></i>
+                 <span>Invalid credentials.</span>
+             </div>
+         </div>
+         ============================================================ -->
+
+    <!-- LEFT BRAND PANEL -->
+    <aside class="login-brand">
+        <div class="brand-content">
+            <div class="brand-logo">
+                <!-- White logo variant for the dark panel -->
+                <img src="img/sgs-logo-secondary.png" alt="SGS">
+            </div>
+            <h1>Portal</h1>
+            <div class="tagline-block" aria-live="polite">
+                <span class="tag-cycle" id="tagCycle">Welcome to the portal.</span>
+            </div>
+            <div class="brand-features">
+                <div class="brand-feature">
+                    <span class="feature-ico"><i class="fas fa-bolt"></i></span>
+                    <span>Fast, streamlined workflows</span>
+                </div>
+                <div class="brand-feature">
+                    <span class="feature-ico"><i class="fas fa-chart-line"></i></span>
+                    <span>Analytics &amp; performance tracking</span>
+                </div>
+                <div class="brand-feature">
+                    <span class="feature-ico"><i class="fas fa-users"></i></span>
+                    <span>Role-based team management</span>
+                </div>
+            </div>
+        </div>
+        <div class="brand-tagline">
+            <span class="tag-line"></span>
+            <span class="tag-word">When you need to be <span class="accent">sure</span></span>
+            <span class="tag-line"></span>
+        </div>
+    </aside>
+
+    <!-- RIGHT FORM PANEL -->
+    <main class="login-form-panel">
+        <div class="form-header">
+            <h2>Welcome back</h2>
+            <p>Sign in to your account to continue</p>
+        </div>
+
+        <!-- WIRE UP: set action + method to your backend login route.
+             If your framework needs a CSRF token, add a hidden input here. -->
+        <form method="POST" action="#" class="login-form">
+            <div class="form-group">
+                <label for="employee_id">Employee ID</label>
+                <div class="input-wrapper">
+                    <i class="fas fa-user input-icon"></i>
+                    <input type="text" id="employee_id" name="employee_id"
+                           placeholder="Enter your Employee ID" required autofocus autocomplete="username">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="input-wrapper">
+                    <i class="fas fa-lock input-icon"></i>
+                    <input type="password" id="password" name="password"
+                           placeholder="Enter your password" required autocomplete="current-password"
+                           style="padding-right: 2.75rem;">
+                    <button type="button" class="password-toggle" onclick="toggleLoginPassword()" aria-label="Show password">
+                        <i class="fas fa-eye" id="toggleIcon"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-login">
+                <i class="fas fa-sign-in-alt"></i>
+                <span>Sign in</span>
+            </button>
+        </form>
+
+        <div class="login-footer">
+            <p class="login-help">
+                <i class="fas fa-info-circle"></i>
+                First time? Contact your administrator for credentials
+            </p>
+        </div>
+    </main>
+
+    <script>
+        // Flash auto-dismiss
+        setTimeout(function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                alert.style.transition = 'opacity 0.3s ease';
+                alert.style.opacity = '0';
+                setTimeout(() => alert.remove(), 300);
+            });
+        }, 5000);
+
+        function toggleLoginPassword() {
+            const input = document.getElementById('password');
+            const icon = document.getElementById('toggleIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye'); icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash'); icon.classList.add('fa-eye');
+            }
+        }
+
+        // ============ Tagline phrase rotator ============
+        // Cycles through short service-line phrases beneath the heading.
+        // EDIT the PHRASES array below to match your project.
+        (function() {
+            const el = document.getElementById('tagCycle');
+            if (!el) return;
+            const reduced = window.matchMedia &&
+                window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduced) return;
+
+            const PHRASES = [
+                'Welcome to the portal.',
+                'Fast, streamlined workflows.',
+                'Smart analytics. Sharper decisions.',
+                'One source of truth.',
+                'Less paperwork. More results.',
+                'When you need to be sure.',
+            ];
+
+            const TYPE_MS  = 55;
+            const ERASE_MS = 28;
+            const HOLD_MS  = 2200;
+            const GAP_MS   = 350;
+
+            let pIdx  = 0;
+            let chars = 0;
+            el.textContent = '';
+
+            function typePhrase() {
+                const phrase = PHRASES[pIdx];
+                const type = setInterval(() => {
+                    chars += 1;
+                    el.textContent = phrase.slice(0, chars);
+                    if (chars >= phrase.length) {
+                        clearInterval(type);
+                        setTimeout(erasePhrase, HOLD_MS);
+                    }
+                }, TYPE_MS);
+            }
+
+            function erasePhrase() {
+                const current = PHRASES[pIdx];
+                const erase = setInterval(() => {
+                    chars -= 1;
+                    el.textContent = current.slice(0, Math.max(0, chars));
+                    if (chars <= 0) {
+                        clearInterval(erase);
+                        pIdx = (pIdx + 1) % PHRASES.length;
+                        setTimeout(typePhrase, GAP_MS);
+                    }
+                }, ERASE_MS);
+            }
+
+            setTimeout(typePhrase, GAP_MS);
+        })();
+    </script>
+</body>
+</html>

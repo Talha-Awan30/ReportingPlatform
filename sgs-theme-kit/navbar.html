@@ -1,0 +1,187 @@
+<!--
+  SGS PORTAL NAVBAR — standalone, copy-paste ready
+  ================================================
+  This is the exact navbar from the SGS portal, with the Flask/Jinja code
+  removed so it drops into any project.
+
+  HOW TO USE
+  1. Make sure these are loaded in your page <head> (see base-layout.html / README):
+       - Roboto font + Font Awesome 6 (CDN links)
+       - css/style.css   (has .navbar, .nav-link, .user-avatar, .logout-btn, etc.)
+  2. Paste the <style> block below into your master template's <head>
+     (or move it into style.css).
+  3. Paste the <nav> markup at the top of <body>.
+  4. Paste the toggleMobileMenu() <script> before </body>.
+  5. Fix the asset paths (img/sgs-logo.png) and the href="#" links to match
+     your routes. Replace the placeholder user name / role / avatar letter.
+-->
+
+<style>
+    /* Navbar logo composition (logo image + portal label).
+       The label uses SGS Charcoal Blue (--secondary-color), flat — no gradient. */
+    .nav-logo {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 0.75rem;
+        background: none !important;
+        -webkit-text-fill-color: initial !important;
+        color: var(--secondary-color) !important;
+        font-size: 1.4rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0 !important;
+        text-decoration: none;
+    }
+    .nav-logo:hover {
+        background: none !important;
+        -webkit-text-fill-color: initial !important;
+        color: var(--primary-color) !important;
+        transform: none !important;
+    }
+    .nav-logo-img {
+        height: 50px;
+        width: auto;
+        display: block;
+        margin-right: -10px;   /* trim built-in whitespace on the right of the SGS PNG */
+    }
+    .nav-logo-text { display: inline-block; line-height: 1.1; }
+    @media (max-width: 600px) { .nav-logo-text { display: none; } }
+
+    /* Navbar dropdown */
+    .nav-dropdown { position: relative; }
+    .nav-dropdown .dropdown-toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .nav-dropdown .dropdown-toggle i.fa-caret-down { font-size: 0.75rem; transition: transform 0.2s ease; }
+    .nav-dropdown:hover .dropdown-toggle i.fa-caret-down { transform: rotate(180deg); }
+    .dropdown-menu {
+        position: absolute; top: 100%; left: 0; background: white; min-width: 200px;
+        border-radius: var(--border-radius-sm); box-shadow: var(--shadow-lg);
+        opacity: 0; visibility: hidden; transform: translateY(10px); transition: all 0.2s ease;
+        list-style: none; padding: 0.5rem 0; z-index: 1000; border: 1px solid var(--border-light);
+    }
+    .nav-dropdown:hover .dropdown-menu { opacity: 1; visibility: visible; transform: translateY(0); }
+    .dropdown-menu li { padding: 0; }
+    .dropdown-menu li a {
+        display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem;
+        color: var(--text-primary); text-decoration: none; font-size: 0.875rem; transition: all 0.15s ease;
+    }
+    .dropdown-menu li a:hover { background: var(--bg-secondary); color: var(--primary-color); }
+    .dropdown-menu li a i { width: 16px; text-align: center; color: var(--text-muted); }
+    .dropdown-menu li a:hover i { color: var(--primary-color); }
+
+    /* User info block (right side) */
+    .user-info { display: flex; flex-direction: column; align-items: flex-end; margin-right: 0.5rem; }
+    .user-name { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); }
+    .user-role { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Ticket / notification badge on a nav item (optional) */
+    .ticket-badge {
+        position: absolute; top: -6px; right: -10px; background: var(--danger-color); color: white;
+        font-size: 0.65rem; font-weight: 700; min-width: 18px; height: 18px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center; line-height: 1; padding: 0 4px;
+        box-shadow: 0 2px 4px rgba(239, 68, 68, 0.4);
+    }
+
+    .nav-container-full { width: 100%; padding: 0 2rem; display: flex; justify-content: space-between; align-items: center; }
+    .nav-link { display: flex; align-items: center; gap: 0.5rem; }
+    .nav-link i { font-size: 0.875rem; }
+
+    /* Hamburger (mobile) */
+    .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 8px; z-index: 1001; background: none; border: none; }
+    .hamburger span { display: block; width: 24px; height: 2.5px; background: var(--text-primary); border-radius: 2px; transition: all 0.3s ease; }
+    .hamburger.active span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
+    .hamburger.active span:nth-child(2) { opacity: 0; }
+    .hamburger.active span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+
+    /* Mobile slide-in menu overlay */
+    .nav-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10999; }
+    .nav-overlay.active { display: block; }
+
+    @media (max-width: 992px) {
+        .hamburger { display: flex; }
+        .nav-menu {
+            position: fixed; top: 0; right: -300px; width: 280px; height: 100vh; background: white;
+            flex-direction: column; align-items: stretch; padding: 1rem; gap: 0;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.15); z-index: 11000; transition: right 0.3s ease; overflow-y: auto;
+        }
+        .nav-menu.active { right: 0; }
+        .nav-menu li { width: 100%; }
+        .nav-menu .nav-link { padding: 12px 16px; border-radius: var(--border-radius-sm); width: 100%; }
+        .nav-menu .nav-link:hover { background: var(--bg-secondary); transform: none; box-shadow: none; }
+        .nav-dropdown .dropdown-menu { position: static; opacity: 1; visibility: visible; transform: none; box-shadow: none; border: none; padding: 0 0 0 1rem; background: transparent; min-width: auto; }
+        .nav-dropdown .dropdown-menu li a { padding: 10px 16px; font-size: 0.85rem; }
+        .nav-user { margin-left: 0; padding: 1rem 0.5rem; border-bottom: 1px solid var(--border-light); margin-bottom: 0.5rem; order: -1; }
+        .user-info { align-items: flex-start; }
+    }
+</style>
+
+<!-- ============ NAVBAR MARKUP ============ -->
+<nav class="navbar">
+    <div class="nav-container-full">
+        <a href="/" class="nav-logo" aria-label="Portal home">
+            <img src="img/sgs-logo.png" alt="SGS" class="nav-logo-img">
+            <span class="nav-logo-text">Portal</span>
+        </a>
+
+        <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+            <span></span><span></span><span></span>
+        </button>
+
+        <div class="nav-overlay" id="navOverlay" onclick="toggleMobileMenu()"></div>
+
+        <ul class="nav-menu" id="navMenu">
+            <li><a href="/" class="nav-link"><i class="fas fa-home"></i> Home</a></li>
+
+            <!-- Dropdown example -->
+            <li class="nav-dropdown">
+                <a href="#" class="nav-link dropdown-toggle">
+                    <i class="fas fa-clipboard-list"></i> Logs <i class="fas fa-caret-down"></i>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="#"><i class="fas fa-file-alt"></i> Proposal Logs</a></li>
+                    <li><a href="#"><i class="fas fa-search"></i> Query Logs</a></li>
+                    <li><a href="#"><i class="fas fa-briefcase"></i> Job Logs</a></li>
+                </ul>
+            </li>
+
+            <li><a href="#" class="nav-link"><i class="fas fa-chart-line"></i> Analytics</a></li>
+            <li><a href="#" class="nav-link"><i class="fas fa-tools"></i> Tools</a></li>
+
+            <!-- Nav item with a notification badge -->
+            <li>
+                <a href="#" class="nav-link" style="position: relative;">
+                    <i class="fas fa-headset"></i> Support
+                    <!-- <span class="ticket-badge">3</span> -->
+                </a>
+            </li>
+
+            <!-- Admin dropdown example -->
+            <li class="nav-dropdown">
+                <a href="#" class="nav-link dropdown-toggle">
+                    <i class="fas fa-cog"></i> Admin <i class="fas fa-caret-down"></i>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="#"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
+                    <li><a href="#"><i class="fas fa-users"></i> Manage Users</a></li>
+                </ul>
+            </li>
+
+            <!-- User block: name + role, avatar (initial), logout -->
+            <li class="nav-user">
+                <div class="user-info">
+                    <span class="user-name">Jane Doe</span>
+                    <span class="user-role">Admin</span>
+                </div>
+                <a href="#" class="user-avatar" title="Account Info" style="text-decoration: none; color: white;">J</a>
+                <a href="#" class="logout-btn" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
+            </li>
+        </ul>
+    </div>
+</nav>
+
+<script>
+    function toggleMobileMenu() {
+        document.getElementById('hamburger').classList.toggle('active');
+        document.getElementById('navMenu').classList.toggle('active');
+        document.getElementById('navOverlay').classList.toggle('active');
+        document.body.style.overflow = document.getElementById('navMenu').classList.contains('active') ? 'hidden' : '';
+    }
+</script>

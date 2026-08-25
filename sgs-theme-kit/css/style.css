@@ -1,0 +1,2134 @@
+/* ============================================================================
+   PROPOSAL AUTOMATION SYSTEM - MAIN STYLESHEET
+   ============================================================================ */
+
+/* CSS Variables - SGS Brand Theme
+   ============================================================================
+   Palette sampled from the official SGS brand guide (see design.md for spec).
+   Brand rule: white dominates; orange is used sparingly with meaning (CTAs,
+   key actions, focus accents). Do NOT color-wash with orange.
+   ============================================================================ */
+:root {
+    /* Brand color — SGS Orange. Used sparingly for primary CTAs, focus rings,
+       active state, links, badges that need attention. */
+    --primary-color: #ff6600;          /* SGS Orange */
+    --primary-dark: #e65a00;           /* darker hover */
+    --primary-darker: #cc5200;
+    --primary-darkest: #b34700;
+
+    /* Primary secondary — SGS Charcoal Blue. The workhorse for headings,
+       icon strokes, nav text, and any large-area dark UI like sidebars/bars. */
+    --secondary-color: #3c515b;        /* SGS Charcoal Blue */
+    --secondary-dark: #2f4049;
+    --secondary-darker: #243137;
+
+    /* Status colors — kept close to the existing semantics but tuned slightly
+       to feel native in the SGS palette. */
+    --success-color: #57c785;          /* SGS Green (secondary palette) */
+    --success-dark: #3fa86b;
+    --success-darker: #2f8e57;
+    --warning-color: #faa61a;          /* SGS Yellow (accent) */
+    --danger-color: #f5262e;           /* SGS Red (secondary palette) */
+    --info-color: #49738b;             /* SGS Blue (secondary palette) */
+
+    /* Gradients — DELIBERATELY FLAT.
+       The SGS guide explicitly says "use flat color, not gradients".
+       These vars remain so existing rules don't break, but they resolve
+       to a single solid color. This kills all text-clip gradients and
+       button gradients across the site automatically. */
+    --gradient-primary:   #ff6600;          /* SGS Orange (flat) */
+    --gradient-brand:     #3c515b;          /* SGS Charcoal Blue (flat) */
+    --gradient-secondary: #3c515b;          /* SGS Charcoal Blue (flat) */
+    --gradient-success: #57c785;            /* SGS Green (flat) */
+    --gradient-navbar:  #ffffff;            /* white navbar, flat */
+
+    /* Text colors */
+    --text-primary: #252525;           /* SGS Charcoal — body copy */
+    --text-secondary: #3c515b;         /* SGS Charcoal Blue — headings + secondary */
+    --text-muted: #738289;              /* SGS Grey Mid */
+
+    /* Surfaces */
+    --bg-primary: #ffffff;              /* dominant */
+    --bg-secondary: #f6f9fc;            /* SGS off-white — cards/section bg */
+    --bg-page: #ffffff;                 /* page bg — keep white per brand */
+    --bg-dark: #3c515b;                 /* dark UI (sidebar, banners) */
+    --bg-hover: rgba(60, 81, 91, 0.04);
+
+    /* Borders */
+    --border-color: #d6dce0;            /* slightly darker than light grey for forms */
+    --border-light: #eceeef;            /* SGS Light Grey */
+    --border-radius: 12px;
+    --border-radius-sm: 8px;
+    --border-radius-xs: 6px;
+
+    /* Shadows */
+    --shadow-sm: 0 2px 8px rgba(60, 81, 91, 0.06);
+    --shadow-md: 0 4px 12px rgba(60, 81, 91, 0.10);
+    --shadow-lg: 0 12px 35px rgba(60, 81, 91, 0.15);
+    --shadow-primary:        0 4px 14px rgba(255, 102, 0, 0.30);
+    --shadow-primary-hover:  0 12px 30px rgba(255, 102, 0, 0.40);
+
+    /* Transitions */
+    --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Reset */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Roboto', 'Helvetica Neue', 'Univers', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background-color: var(--bg-page);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ============================================================================
+   NAVIGATION
+   ============================================================================ */
+
+.navbar {
+    background: var(--gradient-navbar);
+    border-bottom: 2px solid var(--border-color);
+    border-top: 1px solid var(--border-light);
+    padding: 0;
+    min-height: 70px;
+    display: flex;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-md);
+}
+
+.nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.7rem;
+    font-weight: 800;
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-decoration: none;
+    letter-spacing: -0.02em;
+    transition: var(--transition);
+}
+
+.logo-icon {
+    font-size: 1.5rem;
+}
+
+.nav-menu {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    list-style: none;
+    margin-left: auto;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: var(--border-radius-sm);
+    transition: var(--transition);
+}
+
+.nav-link:hover {
+    color: var(--secondary-darker);
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.nav-link.active {
+    color: var(--primary-color);
+    background: var(--bg-primary);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+}
+
+.nav-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+}
+
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--gradient-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 16px;
+    text-transform: uppercase;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    border: 2px solid white;
+}
+
+.logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.logout-btn:hover {
+    background: #ef4444;
+    color: white;
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* ============================================================================
+   BUTTONS
+   ============================================================================ */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 28px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    min-height: 48px;
+    text-decoration: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    border: none;
+    transition: var(--transition);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.2) 50%, transparent 70%);
+    transition: left 0.6s ease;
+}
+
+.btn:hover::before {
+    left: 100%;
+}
+
+/* Primary action buttons use SGS Charcoal Blue site-wide. Orange is kept
+   only for the login "Sign in" button (its own .btn-login rule) so the
+   brand color stays a single deliberate moment, per the SGS guide. */
+.btn-primary {
+    background: var(--secondary-color);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 12px rgba(60, 81, 91, 0.25);
+}
+
+.btn-primary:hover {
+    background: var(--secondary-dark);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(60, 81, 91, 0.35);
+}
+
+/* .btn-cta — the single ORANGE primary action used in a button pair
+   (e.g. page-header "Add / Create" next to a charcoal "Export").
+   Per the SGS guide: one deliberate orange moment, the rest neutral.
+   Stack it with .btn (and optionally .btn-primary). */
+.btn-cta,
+.btn-primary.btn-cta {
+    background: var(--primary-color);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.25);
+}
+.btn-cta:hover,
+.btn-primary.btn-cta:hover {
+    background: var(--primary-dark);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(255, 102, 0, 0.35);
+}
+
+.btn-secondary {
+    background: var(--gradient-secondary);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 14px rgba(107, 114, 128, 0.3);
+}
+
+.btn-secondary:hover {
+    background: var(--secondary-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(107, 114, 128, 0.4);
+}
+
+.btn-outline {
+    background-color: transparent;
+    color: var(--primary-color);
+    border: 2px solid var(--primary-color);
+    font-weight: 600;
+}
+
+.btn-outline:hover {
+    background: var(--gradient-primary);
+    color: white;
+    border-color: var(--primary-color);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-primary);
+}
+
+.btn-block {
+    display: block;
+    width: 100%;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* ============================================================================
+   CONTAINER & LAYOUT
+   ============================================================================ */
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+}
+
+.main-content {
+    flex: 1;
+}
+
+/* ============================================================================
+   HERO SECTION
+   ============================================================================ */
+
+.hero {
+    text-align: center;
+    padding: 3rem 0;
+}
+
+.hero h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.hero p {
+    font-size: 1.125rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================================================
+   SERVICES SECTION
+   ============================================================================ */
+
+.section-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: var(--text-primary);
+}
+
+.services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.5rem;
+}
+
+.service-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+}
+
+.service-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.service-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.service-icon {
+    font-size: 2rem;
+}
+
+.service-header h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.service-description {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.proposals-list h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.proposals-list ul {
+    list-style: none;
+    margin-bottom: 1rem;
+}
+
+.proposals-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.proposals-list li:last-child {
+    border-bottom: none;
+}
+
+.proposal-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.proposal-link:hover {
+    color: var(--primary-color);
+}
+
+.no-proposals {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+/* ============================================================================
+   BADGES
+   ============================================================================ */
+
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 9999px;
+    white-space: nowrap;
+}
+
+.badge-success {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.badge-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.badge-danger {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-info {
+    background-color: #e2ecf2;
+    color: var(--info-color);
+}
+
+.badge-primary {
+    background-color: #ffe9d6;
+    color: var(--primary-darkest);
+}
+
+.badge-secondary {
+    background-color: #f1f5f9;
+    color: #475569;
+}
+
+/* ============================================================================
+   STATS SECTION
+   ============================================================================ */
+
+.stats-section {
+    margin-top: 3rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+.stat-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    text-align: center;
+    border: 1px solid var(--border-color);
+}
+
+.stat-number {
+    display: block;
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.stat-primary { border-left: 4px solid var(--primary-color); }
+.stat-success { border-left: 4px solid var(--success-color); }
+.stat-info { border-left: 4px solid var(--info-color); }
+.stat-warning { border-left: 4px solid var(--warning-color); }
+
+/* ============================================================================
+   LOGIN PAGE
+   ============================================================================ */
+
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 60vh;
+}
+
+.login-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 2.5rem;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border-color);
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.login-icon {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+.login-header h1 {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.login-header p {
+    color: var(--text-secondary);
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.form-group input {
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    transition: var(--transition);
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.login-footer {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+    text-align: center;
+}
+
+.login-footer p {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.credentials-list {
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================================================
+   FLASH MESSAGES / ALERTS
+   ============================================================================ */
+
+.flash-messages {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem;
+}
+
+.alert {
+    padding: 1rem 1.25rem;
+    border-radius: var(--border-radius);
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.alert-success {
+    background-color: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.alert-danger {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.alert-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.alert-info {
+    background-color: #e2ecf2;
+    color: var(--info-color);
+    border: 1px solid #c4d3dc;
+}
+
+.alert-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: var(--transition);
+}
+
+.alert-close:hover {
+    opacity: 1;
+}
+
+/* ============================================================================
+   BREADCRUMB
+   ============================================================================ */
+
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.breadcrumb a {
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.breadcrumb a:hover {
+    color: var(--primary-color);
+}
+
+.breadcrumb .sep {
+    color: var(--text-muted);
+    opacity: 0.5;
+    font-size: 0.75rem;
+}
+
+.breadcrumb .current {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Legacy "/" separator support */
+.breadcrumb span {
+    color: var(--text-muted);
+}
+
+/* ============================================================================
+   SERVICE DETAIL PAGE
+   ============================================================================ */
+
+.service-detail-header {
+    margin-bottom: 2rem;
+}
+
+.service-detail-header h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.service-detail-header p {
+    color: var(--text-secondary);
+}
+
+.proposals-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.proposals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.proposal-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.proposal-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.proposal-card-header h3 {
+    font-size: 1.125rem;
+}
+
+.proposal-card-description {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
+/* ============================================================================
+   EMPTY STATE
+   ============================================================================ */
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.empty-icon {
+    font-size: 4rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    font-size: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+.empty-state-small {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+}
+
+/* ============================================================================
+   ADMIN PAGES
+   ============================================================================ */
+
+.admin-header {
+    margin-bottom: 2rem;
+}
+
+.admin-header h1 {
+    font-size: 1.35rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    padding-bottom: 0.35rem;
+    border-bottom: 3px solid var(--primary-color);
+    display: inline-block;
+}
+
+.admin-header p {
+    color: var(--text-secondary);
+    margin-top: 1rem;
+}
+
+.admin-stats {
+    margin-bottom: 2rem;
+}
+
+.admin-actions {
+    margin-bottom: 2rem;
+}
+
+.admin-actions h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 3px solid var(--primary-color);
+    display: inline-block;
+}
+
+.actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.action-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+    color: inherit;
+    transition: var(--transition);
+}
+
+.action-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.action-icon {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.75rem;
+}
+
+.action-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+.action-card p {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.admin-overview,
+.admin-recent {
+    margin-bottom: 2rem;
+}
+
+.admin-overview h2,
+.admin-recent h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 3px solid var(--primary-color);
+    display: inline-block;
+}
+
+/* ============================================================================
+   TABLES
+   ============================================================================ */
+
+.table-container {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.admin-table th {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.admin-table tr:last-child td {
+    border-bottom: none;
+}
+
+.admin-table tr:hover {
+    background-color: var(--bg-secondary);
+}
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+code {
+    background: var(--bg-secondary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--primary-color);
+}
+
+/* ============================================================================
+   SERVICE MANAGEMENT
+   ============================================================================ */
+
+.service-management-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.service-management-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.service-management-header h3 {
+    font-size: 1.125rem;
+    margin-bottom: 0.25rem;
+}
+
+.service-management-header p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.service-proposals-list {
+    padding: 0;
+}
+
+.service-proposals-list .admin-table th,
+.service-proposals-list .admin-table td {
+    padding: 0.875rem 1.25rem;
+}
+
+/* ============================================================================
+   HELP SECTION
+   ============================================================================ */
+
+.help-section {
+    margin-top: 2rem;
+}
+
+.help-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.help-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.help-card ol {
+    margin-left: 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.help-card li {
+    margin-bottom: 0.5rem;
+}
+
+/* ============================================================================
+   ERROR PAGES
+   ============================================================================ */
+
+.error-page {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.error-code {
+    font-size: 8rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    line-height: 1;
+}
+
+.error-page h1 {
+    font-size: 2rem;
+    margin: 1rem 0;
+}
+
+.error-page p {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+
+.footer {
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-color);
+    padding: 0.85rem 0;
+    margin-top: auto;
+}
+.footer p { margin: 0; font-size: 0.85rem; line-height: 1.4; }
+
+.footer-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+
+/* ============================================================================
+   FULL WIDTH LAYOUT
+   ============================================================================ */
+
+.nav-container-full {
+    width: 100%;
+    padding: 0 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 70px;
+}
+
+.container-full {
+    width: 100%;
+    padding: 2rem;
+}
+
+.footer-container-full {
+    width: 100%;
+    padding: 0 2rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.services-grid-full {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 1.5rem;
+}
+
+/* ============================================================================
+   LOGIN PAGE FULL WIDTH
+   ============================================================================ */
+
+.login-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 200px);
+    padding: 2rem;
+}
+
+/* ============================================================================
+   USER INFO IN NAVBAR
+   ============================================================================ */
+
+.user-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.3;
+}
+
+.user-info strong {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.user-info small {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* ============================================================================
+   USER SERVICE INFO
+   ============================================================================ */
+
+.user-service-info {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-primary);
+    border-radius: 9999px;
+    display: inline-block;
+    font-size: 0.9rem;
+    border: 1px solid var(--border-color);
+}
+
+/* ============================================================================
+   LOGIN PROMPT
+   ============================================================================ */
+
+.login-prompt {
+    margin-top: 3rem;
+    text-align: center;
+}
+
+.login-prompt-card {
+    background: var(--bg-primary);
+    border: 2px dashed var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.login-prompt-card h3 {
+    margin-bottom: 0.5rem;
+}
+
+.login-prompt-card p {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+/* ============================================================================
+   ADMIN HEADER WITH ACTION
+   ============================================================================ */
+
+.admin-header-with-action {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.admin-header-with-action h1 {
+    font-size: 2rem;
+    margin-bottom: 0.25rem;
+}
+
+.admin-header-with-action p {
+    color: var(--text-secondary);
+}
+
+/* ============================================================================
+   FORM STYLES
+   ============================================================================ */
+
+.form-page {
+    display: flex;
+    justify-content: center;
+    padding: 1rem 0;
+}
+
+.form-card-large {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    width: 100%;
+    max-width: 700px;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+}
+
+.form-header {
+    margin-bottom: 2rem;
+}
+
+.form-header h1 {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.form-header p {
+    color: var(--text-secondary);
+}
+
+.admin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.form-group label.required::after {
+    content: ' *';
+    color: var(--danger-color);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    font-family: inherit;
+    transition: var(--transition);
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.form-group input:disabled {
+    background-color: var(--bg-secondary);
+    cursor: not-allowed;
+}
+
+.form-group small {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Checkbox */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+}
+
+/* ============================================================================
+   DANGER ZONE
+   ============================================================================ */
+
+.danger-zone {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: var(--border-radius);
+}
+
+.danger-zone h3 {
+    color: #991b1b;
+    margin-bottom: 0.5rem;
+}
+
+.danger-zone p {
+    color: #7f1d1d;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #dc2626;
+}
+
+/* ============================================================================
+   INFO CARDS
+   ============================================================================ */
+
+.info-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.info-card {
+    background: var(--bg-primary);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.info-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    color: var(--primary-color);
+}
+
+.info-card ul {
+    margin-left: 1.25rem;
+}
+
+.info-card li {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.info-card p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+/* ============================================================================
+   PROFESSIONAL UI ENHANCEMENTS
+   ============================================================================ */
+
+/* Better button styles */
+.btn-lg {
+    padding: 0.875rem 1.5rem;
+    font-size: 1rem;
+}
+
+.btn-full {
+    display: block;
+    width: 100%;
+}
+
+/* Login page improvements */
+.login-card {
+    border: none;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+.login-header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.login-help {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
+
+/* Service card improvements */
+.service-card {
+    display: flex;
+    flex-direction: column;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.service-card:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.service-header {
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.service-header h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.proposals-list {
+    flex: 1;
+    margin-bottom: 1.5rem;
+}
+
+.proposals-list h4 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.75rem;
+}
+
+/* Hero improvements */
+.hero {
+    padding: 2.5rem 0;
+}
+
+.hero h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}
+
+.hero p {
+    color: var(--text-muted);
+}
+
+/* Section title */
+.section-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 2rem;
+    letter-spacing: -0.5px;
+    padding-bottom: 0.35rem;
+    border-bottom: 3px solid var(--primary-color);
+    display: inline-block;
+}
+
+/* Stats cards improvements */
+.stat-card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Login prompt improvements */
+.login-prompt-card {
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.login-prompt-card h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+/* Navbar improvements */
+.navbar {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.nav-logo:hover {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    transform: translateY(-1px);
+}
+
+/* Badge improvements */
+.badge {
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.25px;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+
+/* --- Tablets & Small Laptops (max-width: 1024px) --- */
+@media (max-width: 1024px) {
+    .container {
+        max-width: 100%;
+        padding: 1.5rem 1rem;
+    }
+
+    .container-full {
+        padding: 1.5rem 1rem;
+    }
+
+    .services-grid,
+    .services-grid-full {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+
+    .proposals-grid {
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+
+    .actions-grid {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .info-cards {
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    }
+}
+
+/* --- Tablets (max-width: 768px) --- */
+@media (max-width: 768px) {
+    .nav-container-full {
+        padding: 0 1rem;
+    }
+
+    .container-full {
+        padding: 1rem;
+    }
+
+    /* Hero */
+    .hero {
+        padding: 1.5rem 0;
+    }
+
+    .hero h1 {
+        font-size: 1.5rem;
+    }
+
+    .hero p {
+        font-size: 1rem;
+    }
+
+    /* Grids */
+    .services-grid,
+    .services-grid-full {
+        grid-template-columns: 1fr;
+    }
+
+    .proposals-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .actions-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .info-cards {
+        grid-template-columns: 1fr;
+    }
+
+    /* Tables - horizontal scroll, locked to X-axis so the page doesn't
+       jiggle vertically while the user swipes a row sideways. */
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        touch-action: pan-x;
+    }
+
+    /* Sticky headers don't behave well inside a horizontally-scrolling
+       container on mobile (rows appear to shift up/down as you swipe).
+       Drop sticky on mobile and let the header scroll with the rows. */
+    .data-table th,
+    .admin-table th {
+        position: static !important;
+    }
+
+    .admin-table {
+        font-size: 0.8rem;
+        min-width: 600px;
+    }
+
+    .admin-table th,
+    .admin-table td {
+        padding: 0.6rem 0.5rem;
+        white-space: nowrap;
+    }
+
+    /* KPI cards / stats strip: prevent long PKR numbers from clipping or
+       overflowing the page on small screens. */
+    .stats-bar,
+    .stats-grid,
+    .stats-strip,
+    .kpi-strip {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    .stat-card .stat-value,
+    .stat-card .kpi-val,
+    .kpi-card .stat-value,
+    .kpi-card .kpi-val {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        word-break: break-word;
+        min-width: 0;
+    }
+    .stat-card { min-width: 0; overflow: hidden; }
+
+    /* Forms */
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .form-actions {
+        flex-direction: column-reverse;
+    }
+
+    .form-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .form-card-large {
+        max-width: 100%;
+        padding: 1.5rem;
+    }
+
+    /* Admin */
+    .admin-header-with-action {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    .admin-header-with-action .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* Login */
+    .login-card {
+        padding: 1.5rem;
+        margin: 0 1rem;
+    }
+
+    .login-page {
+        padding: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+        padding: 10px 18px;
+        font-size: 0.875rem;
+        min-height: 42px;
+    }
+
+    /* Footer */
+    .footer-container-full {
+        padding: 1rem;
+    }
+
+    /* Flash messages */
+    .flash-messages {
+        padding: 0.75rem 1rem;
+    }
+
+    /* Error page */
+    .error-code {
+        font-size: 5rem;
+    }
+
+    .error-page h1 {
+        font-size: 1.5rem;
+    }
+
+    /* Stat cards */
+    .stat-card {
+        padding: 1rem;
+    }
+
+    .stat-number {
+        font-size: 1.5rem;
+    }
+
+    /* Breadcrumb */
+    .breadcrumb {
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+
+    /* Service management */
+    .service-management-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    /* ----------------------------------------------------------------
+       Global responsive safety-net — catches common page patterns that
+       individual templates style locally (page headers, filter bars,
+       stat strips, tables). Keeps every page usable on tablets/phones
+       without editing each template.
+       ---------------------------------------------------------------- */
+    .page-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: 0.85rem;
+    }
+    .header-actions,
+    .page-header-actions,
+    .admin-actions-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        width: 100%;
+    }
+    .header-actions .btn,
+    .header-actions > a,
+    .header-actions > button,
+    .page-header-actions .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        min-height: 42px;
+    }
+    .filters-bar,
+    .filter-bar,
+    .filters-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .filters-bar .filter-group,
+    .filters-bar select,
+    .filters-bar input,
+    .filter-bar select,
+    .filter-bar input {
+        width: 100%;
+        min-width: 0;
+    }
+    .stats-bar,
+    .stats-strip,
+    .kpi-strip {
+        flex-wrap: wrap;
+    }
+    .stats-bar .stat-item,
+    .kpi-strip .kpi-tile {
+        flex: 1 1 calc(50% - 0.5rem);
+        min-width: calc(50% - 0.5rem);
+    }
+    /* Any table that isn't already in a scroll wrapper still scrolls
+       rather than blowing out the viewport width. */
+    .scrollable-table,
+    .table-scroll,
+    .data-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* ============================================================================
+   ANIMATIONS & TRANSITIONS
+   ============================================================================ */
+
+/* Page fade-in */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInScale {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes countUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Main content fade-in */
+.main-content {
+    animation: fadeIn 0.4s ease-out;
+}
+
+/* Staggered card animations */
+.service-card,
+.action-card,
+.info-card,
+.proposal-card,
+.stat-card,
+.chart-card,
+.login-card,
+.form-card-large,
+.table-container,
+.service-management-card,
+.help-card,
+.login-prompt-card,
+.danger-zone,
+.empty-state {
+    animation: fadeInScale 0.4s ease-out backwards;
+}
+
+.service-card:nth-child(1), .action-card:nth-child(1), .stat-card:nth-child(1) { animation-delay: 0.05s; }
+.service-card:nth-child(2), .action-card:nth-child(2), .stat-card:nth-child(2) { animation-delay: 0.1s; }
+.service-card:nth-child(3), .action-card:nth-child(3), .stat-card:nth-child(3) { animation-delay: 0.15s; }
+.service-card:nth-child(4), .action-card:nth-child(4), .stat-card:nth-child(4) { animation-delay: 0.2s; }
+.service-card:nth-child(5), .action-card:nth-child(5), .stat-card:nth-child(5) { animation-delay: 0.25s; }
+.service-card:nth-child(6), .action-card:nth-child(6), .stat-card:nth-child(6) { animation-delay: 0.3s; }
+.service-card:nth-child(7), .stat-card:nth-child(7) { animation-delay: 0.35s; }
+.service-card:nth-child(8), .stat-card:nth-child(8) { animation-delay: 0.4s; }
+
+/* Hero animation */
+.hero {
+    animation: fadeIn 0.5s ease-out;
+}
+
+.hero h1 {
+    animation: fadeInUp 0.5s ease-out 0.1s backwards;
+}
+
+.hero p {
+    animation: fadeInUp 0.5s ease-out 0.2s backwards;
+}
+
+/* Section titles slide in */
+.section-title,
+.admin-header h1,
+.admin-actions h2,
+.admin-overview h2,
+.admin-recent h2 {
+    animation: fadeInUp 0.4s ease-out backwards;
+}
+
+/* Table row stagger */
+.admin-table tbody tr {
+    animation: fadeIn 0.3s ease-out backwards;
+}
+
+.admin-table tbody tr:nth-child(1) { animation-delay: 0.03s; }
+.admin-table tbody tr:nth-child(2) { animation-delay: 0.06s; }
+.admin-table tbody tr:nth-child(3) { animation-delay: 0.09s; }
+.admin-table tbody tr:nth-child(4) { animation-delay: 0.12s; }
+.admin-table tbody tr:nth-child(5) { animation-delay: 0.15s; }
+.admin-table tbody tr:nth-child(6) { animation-delay: 0.18s; }
+.admin-table tbody tr:nth-child(7) { animation-delay: 0.21s; }
+.admin-table tbody tr:nth-child(8) { animation-delay: 0.24s; }
+.admin-table tbody tr:nth-child(9) { animation-delay: 0.27s; }
+.admin-table tbody tr:nth-child(10) { animation-delay: 0.3s; }
+
+/* Smooth hover lifts */
+.service-card,
+.action-card,
+.info-card,
+.stat-card,
+.chart-card,
+.proposal-card {
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Button press effect */
+.btn:active {
+    transform: scale(0.97);
+    transition: transform 0.1s ease;
+}
+
+/* Navbar entrance */
+.navbar {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Nav links hover glow */
+.nav-link {
+    transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Footer slide up */
+.footer {
+    animation: fadeIn 0.4s ease-out 0.3s backwards;
+}
+
+/* Flash message entrance */
+.alert {
+    animation: slideInRight 0.35s ease-out backwards;
+}
+
+/* Login card special entrance */
+.login-card {
+    animation: fadeInScale 0.5s ease-out;
+}
+
+/* Form focus glow animation */
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+
+/* Badge pulse on appear */
+.ticket-badge {
+    animation: fadeInScale 0.3s ease-out;
+}
+
+/* User avatar hover */
+.user-avatar {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.user-avatar:hover {
+    transform: scale(1.08);
+    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+}
+
+/* Breadcrumb fade in */
+.breadcrumb {
+    animation: fadeIn 0.3s ease-out 0.1s backwards;
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-delay: 0ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* --- Mobile Phones (max-width: 480px) --- */
+@media (max-width: 480px) {
+    .container {
+        padding: 1rem 0.75rem;
+    }
+
+    .container-full {
+        padding: 0.75rem;
+    }
+
+    .hero h1 {
+        font-size: 1.25rem;
+    }
+
+    .hero p {
+        font-size: 0.875rem;
+    }
+
+    .section-title {
+        font-size: 1.1rem;
+    }
+
+    /* Stats */
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+
+    .stat-card {
+        padding: 0.75rem;
+    }
+
+    .stat-number {
+        font-size: 1.25rem;
+    }
+
+    .stat-label {
+        font-size: 0.7rem;
+    }
+
+    /* Actions grid */
+    .actions-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Admin header */
+    .admin-header h1 {
+        font-size: 1.1rem;
+    }
+
+    .admin-actions h2,
+    .admin-overview h2,
+    .admin-recent h2 {
+        font-size: 1.1rem;
+    }
+
+    /* Service card */
+    .service-card {
+        padding: 1rem;
+    }
+
+    .service-header h3 {
+        font-size: 1rem;
+    }
+
+    .service-icon {
+        font-size: 1.5rem;
+    }
+
+    /* Login */
+    .login-card {
+        padding: 1.25rem;
+        margin: 0 0.5rem;
+    }
+
+    .login-header h1 {
+        font-size: 1.25rem;
+    }
+
+    .login-icon {
+        font-size: 2rem;
+    }
+
+    /* Empty state */
+    .empty-state {
+        padding: 2rem 1rem;
+    }
+
+    .empty-icon {
+        font-size: 2.5rem;
+    }
+
+    .empty-state h3 {
+        font-size: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+        padding: 8px 14px;
+        font-size: 0.8rem;
+        min-height: 38px;
+    }
+
+    .btn-sm {
+        padding: 4px 8px;
+        font-size: 0.7rem;
+    }
+
+    /* Badge */
+    .badge {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.5rem;
+    }
+
+    /* Nav logo */
+    .nav-logo {
+        font-size: 1.3rem;
+    }
+
+    /* Login prompt */
+    .login-prompt-card {
+        padding: 1.25rem;
+    }
+
+    /* Danger zone */
+    .danger-zone {
+        padding: 1rem;
+    }
+
+    /* Global phone safety-net (extends the 768px rules above) */
+    .stats-bar .stat-item,
+    .kpi-strip .kpi-tile {
+        flex: 1 1 100%;
+        min-width: 100%;
+    }
+    .page-title {
+        font-size: 1.15rem;
+    }
+    .breadcrumb {
+        font-size: 0.75rem;
+    }
+    /* Modals: never wider than the screen, scroll if tall */
+    .modal-content,
+    .modal-box,
+    .modal-overlay > div {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+}
