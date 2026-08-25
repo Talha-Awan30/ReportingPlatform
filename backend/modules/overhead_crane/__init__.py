@@ -1,1 +1,0 @@
-"""Overhead Crane inspection module."""

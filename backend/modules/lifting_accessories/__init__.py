@@ -1,0 +1,1 @@
+"""Lifting Accessories inspection module."""

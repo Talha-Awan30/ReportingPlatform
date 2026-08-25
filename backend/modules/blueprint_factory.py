@@ -25,7 +25,9 @@ def resolve_options(spec):
     A module-scoped list wins over the global list of the same key, so a module
     can override standard wording without affecting the others.
     """
-    keys = {cp.options_key for cp in spec.checkpoints if cp.kind == "dropdown" and cp.options_key}
+    # option_keys covers the title page, the particulars table, the check-list
+    # and the conclusion - not just the check-list.
+    keys = spec.option_keys
     if not keys:
         return {}
 

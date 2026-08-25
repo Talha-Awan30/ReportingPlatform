@@ -77,12 +77,22 @@ class Report(BaseModel):
     job_id = db.Column(
         db.Integer, db.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Nullable: in a multi-unit set the inspector types each unit's Identification
+    # into the particulars table rather than picking from the register. The
+    # equipment row is created or matched on submit, so expiry tracking still works.
     equipment_id = db.Column(
-        db.Integer, db.ForeignKey("equipment.id", ondelete="RESTRICT"), nullable=False, index=True
+        db.Integer, db.ForeignKey("equipment.id", ondelete="RESTRICT"), index=True
     )
 
     status = db.Column(db.Enum(ReportStatus), nullable=False, default=ReportStatus.DRAFT, index=True)
     revision = db.Column(db.Integer, nullable=False, default=1)
+
+    # When this visit covers several units, the shared title page lives on the
+    # set and `sequence` is this unit's position within it (1-based).
+    inspection_set_id = db.Column(
+        db.Integer, db.ForeignKey("inspection_sets.id", ondelete="CASCADE"), index=True
+    )
+    sequence = db.Column(db.Integer, nullable=False, default=1)
 
     inspection_date = db.Column(db.Date, index=True)
     next_inspection_date = db.Column(db.Date)
@@ -109,6 +119,7 @@ class Report(BaseModel):
     pdf_path = db.Column(db.String(500))
     generated_at = db.Column(db.DateTime)
 
+    inspection_set = db.relationship("InspectionSet", back_populates="reports")
     job = db.relationship("Job", back_populates="reports")
     equipment = db.relationship("Equipment", back_populates="reports")
     inspector = db.relationship("User", foreign_keys=[inspector_id])
@@ -168,6 +179,7 @@ class Report(BaseModel):
         data["inspector_name"] = self.inspector.full_name if self.inspector else None
         data["reviewer_name"] = self.reviewer.full_name if self.reviewer else None
         data["photo_count"] = len(self.photos)
+        data["set_number"] = self.inspection_set.set_number if self.inspection_set else None
 
         if detail:
             data["photos"] = [p.to_dict() for p in self.photos]

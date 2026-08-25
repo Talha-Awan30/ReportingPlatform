@@ -143,25 +143,28 @@ def get_report(report_id):
 @roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
 def create_report():
     data = request.get_json(silent=True) or {}
-    require_fields(data, "module_slug", "job_id", "equipment_id")
+    require_fields(data, "module_slug", "job_id")
 
     spec = get_module(data["module_slug"])
     if spec is None:
         raise ApiError(f"Unknown inspection module '{data['module_slug']}'.", 404, "module_not_found")
 
     job = Job.query.get_or_404(data["job_id"])
-    equipment = Equipment.query.get_or_404(data["equipment_id"])
-    if equipment.client_id != job.client_id:
-        raise ApiError(
-            "That equipment belongs to a different client than the job.", 422, "client_mismatch"
-        )
+
+    equipment = None
+    if data.get("equipment_id"):
+        equipment = Equipment.query.get_or_404(data["equipment_id"])
+        if equipment.client_id != job.client_id:
+            raise ApiError(
+                "That equipment belongs to a different client than the job.", 422, "client_mismatch"
+            )
 
     user = current_user()
     report = Report(
         module_slug=spec.slug,
         report_number=next_report_number(spec.report_prefix),
         job_id=job.id,
-        equipment_id=equipment.id,
+        equipment_id=equipment.id if equipment else None,
         inspector_id=user.id,
         status=ReportStatus.DRAFT,
         inspection_date=parse_date(data.get("inspection_date"), "inspection_date")
@@ -171,7 +174,11 @@ def create_report():
     )
     db.session.add(report)
     db.session.flush()
-    report.log_event(ReportEventType.CREATED, user, note=f"Draft created for {equipment.tag_number}")
+    report.log_event(
+        ReportEventType.CREATED,
+        user,
+        note=f"Draft created for {equipment.tag_number}" if equipment else "Draft created",
+    )
     db.session.commit()
 
     return {"report": report.to_dict(detail=True)}, 201
@@ -227,6 +234,13 @@ def submit_report(report_id):
 
     spec = get_module(report.module_slug)
     _assert_required_answered(report, spec)
+    _assert_required_photos(report, spec)
+
+    # The inspector typed the unit's ID rather than picking from the register,
+    # so match or create the equipment row now - expiry tracking needs it.
+    from core.inspection_sets.routes import resolve_equipment_for
+
+    resolve_equipment_for(report, spec)
 
     user = current_user()
     report.status = ReportStatus.SUBMITTED
@@ -444,7 +458,7 @@ def _assert_required_answered(report, spec):
 
     answers = report.data or {}
     missing = []
-    for checkpoint in spec.checkpoints:
+    for checkpoint in spec.all_unit_fields:
         if not checkpoint.required:
             continue
         entry = answers.get(checkpoint.key)
@@ -494,3 +508,25 @@ def _sync_equipment_certification(report):
         equipment.last_inspection_date = report.inspection_date
     if report.certificate_expiry_date:
         equipment.certificate_expiry_date = report.certificate_expiry_date
+
+
+def _assert_required_photos(report, spec):
+    """Block submission while a required photo slot is still empty."""
+    if not spec or not spec.photo_slots:
+        return
+
+    filled = {p.checkpoint_key for p in report.photos if p.checkpoint_key}
+    missing = [
+        {"key": slot.key, "label": slot.label}
+        for slot in spec.photo_slots
+        if slot.required and slot.key not in filled
+    ]
+
+    if missing:
+        raise ApiError(
+            f"{len(missing)} required photograph(s) are missing: "
+            + ", ".join(m["label"] for m in missing),
+            422,
+            "missing_photos",
+            {"missing_photos": missing},
+        )

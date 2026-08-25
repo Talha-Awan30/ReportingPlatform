@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { downloadFile, moduleApi, reportApi } from '../api/endpoints'
 import { errorDetails, errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { DynamicFieldGrid } from '../components/DynamicFields'
 import { ROLES, useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
@@ -145,13 +146,23 @@ export default function ReportDetail() {
   if (report.error) return <Empty icon="fa-triangle-exclamation" title="Could not load this report">{report.error}</Empty>
 
   const missingKeys = new Set(missing.map((m) => m.key))
+  const filledSlots = new Set(
+    (data.photos || []).filter((p) => p.checkpoint_key).map((p) => p.checkpoint_key),
+  )
+  const slotsFilled = (module?.photo_slots || []).filter((s) => filledSlots.has(s.key)).length
 
   return (
     <>
       <PageHeader
         icon="fa-file-lines"
         title={data.report_number}
-        subtitle={`${data.equipment_type} · ${data.equipment_tag} · ${data.client_name}`}
+        subtitle={[
+          data.set_number && `${data.set_number} · ${module?.unit_noun || 'unit'} #${data.sequence}`,
+          data.equipment_tag,
+          data.client_name,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         crumbs={[{ label: 'Reports', to: '/reports' }, { label: data.report_number }]}
         actions={
           <>
@@ -300,6 +311,33 @@ export default function ReportDetail() {
         )}
       </div>
 
+      {/* ------------------------------------------------- particulars table */}
+      {module?.unit_details?.length > 0 && (
+        <div className="section-card">
+          <div className="card-head">
+            <div>
+              <h2><i className="fas fa-table-list" /> Particulars</h2>
+              <p className="card-sub">
+                The detail table printed at the head of this {module.unit_noun}&apos;s report.
+              </p>
+            </div>
+            {data.set_number && (
+              <Link to={`/inspection-sets/${data.inspection_set_id}`} className="btn btn-outline btn-sm">
+                <i className="fas fa-layer-group" /> {data.set_number} · {module.unit_noun} #{data.sequence}
+              </Link>
+            )}
+          </div>
+          <DynamicFieldGrid
+            fields={module.unit_details}
+            values={answers}
+            options={options}
+            editable={canEdit}
+            missingKeys={missingKeys}
+            onChange={(key, patch) => setAnswer(key, patch)}
+          />
+        </div>
+      )}
+
       {/* -------------------------------------------------------------- form */}
       {schema.loading ? (
         <Spinner label="Loading the inspection form" />
@@ -349,6 +387,26 @@ export default function ReportDetail() {
         </div>
       )}
 
+      {/* --------------------------------------------- findings & conclusion */}
+      {module?.conclusion?.length > 0 && (
+        <div className="section-card">
+          <div className="card-head">
+            <div>
+              <h2><i className="fas fa-gavel" /> Findings &amp; conclusion</h2>
+              <p className="card-sub">Closes this {module.unit_noun}&apos;s report.</p>
+            </div>
+          </div>
+          <DynamicFieldGrid
+            fields={module.conclusion}
+            values={answers}
+            options={options}
+            editable={canEdit}
+            missingKeys={missingKeys}
+            onChange={(key, patch) => setAnswer(key, patch)}
+          />
+        </div>
+      )}
+
       {/* ---------------------------------------------------------- comments */}
       <div className="section-card">
         <div className="card-head">
@@ -373,27 +431,59 @@ export default function ReportDetail() {
       </div>
 
       {/* ------------------------------------------------------------ photos */}
-      <PhotoSection
-        reportId={id}
-        title="Front-page photographs"
-        subtitle="Used only on the report cover — kept separate on purpose."
-        icon="fa-image"
-        kind="front_page"
-        photos={(data.photos || []).filter((p) => p.kind === 'front_page')}
-        editable={canEdit}
-        onChanged={report.reload}
-      />
+      {module?.photo_slots?.length > 0 ? (
+        <div className="section-card">
+          <div className="card-head">
+            <div>
+              <h2><i className="fas fa-images" /> Photographic presentation</h2>
+              <p className="card-sub">
+                One photograph per box, laid out exactly as the approved report format.
+              </p>
+            </div>
+            <Pill tone={slotsFilled === module.photo_slots.length ? 'success' : 'warning'}>
+              {slotsFilled} of {module.photo_slots.length} filled
+            </Pill>
+          </div>
+          <div className="photo-grid">
+            {module.photo_slots.map((slot) => (
+              <ReportPhotoSlot
+                key={slot.key}
+                reportId={id}
+                slot={slot}
+                photos={(data.photos || []).filter(
+                  (p) => p.kind === 'inspection' && p.checkpoint_key === slot.key,
+                )}
+                editable={canEdit}
+                onChanged={report.reload}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <PhotoSection
+            reportId={id}
+            title="Front-page photographs"
+            subtitle="Used only on the report cover — kept separate on purpose."
+            icon="fa-image"
+            kind="front_page"
+            photos={(data.photos || []).filter((p) => p.kind === 'front_page')}
+            editable={canEdit}
+            onChanged={report.reload}
+          />
 
-      <PhotoSection
-        reportId={id}
-        title="Inspection photographs"
-        subtitle="Evidence for the body of the report."
-        icon="fa-images"
-        kind="inspection"
-        photos={(data.photos || []).filter((p) => p.kind === 'inspection')}
-        editable={canEdit}
-        onChanged={report.reload}
-      />
+          <PhotoSection
+            reportId={id}
+            title="Inspection photographs"
+            subtitle="Evidence for the body of the report."
+            icon="fa-images"
+            kind="inspection"
+            photos={(data.photos || []).filter((p) => p.kind === 'inspection')}
+            editable={canEdit}
+            onChanged={report.reload}
+          />
+        </>
+      )}
 
       {/* ------------------------------------------------------------- trail */}
       <div className="section-card">
@@ -633,6 +723,98 @@ function PhotoSection({ reportId, title, subtitle, icon, kind, photos, editable,
         </Empty>
       )}
     </div>
+  )
+}
+
+/** One labelled box of the photographic presentation. */
+function ReportPhotoSlot({ reportId, slot, photos, editable, onChanged }) {
+  const toast = useToast()
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+
+  const upload = async (event) => {
+    const files = event.target.files
+    if (!files?.length) return
+    setBusy(true)
+    try {
+      await reportApi.uploadPhotos(reportId, files, 'inspection', { checkpoint_key: slot.key })
+      toast.success(`${slot.label} uploaded.`)
+      onChanged()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setBusy(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  const remove = async (photoId) => {
+    try {
+      await reportApi.deletePhoto(reportId, photoId)
+      onChanged()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    }
+  }
+
+  const first = photos[0]
+
+  return (
+    <figure className="photo-tile">
+      {first ? (
+        <img src={first.url} alt={slot.label} loading="lazy" />
+      ) : (
+        <div
+          style={{
+            height: 130,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--text-muted)',
+            fontSize: '1.5rem',
+            background: 'var(--bg-secondary)',
+          }}
+        >
+          <i className="fas fa-camera" />
+        </div>
+      )}
+      <figcaption className="photo-meta">
+        <span title={slot.label}>
+          {slot.label}
+          {slot.required && !first && <span style={{ color: 'var(--danger-color)' }}> *</span>}
+        </span>
+        {editable && (
+          <span style={{ display: 'flex', gap: '0.35rem' }}>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={upload}
+            />
+            <button
+              type="button"
+              className="toast-close"
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              aria-label={`Upload ${slot.label}`}
+            >
+              <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-upload'}`} />
+            </button>
+            {first && (
+              <button
+                type="button"
+                className="toast-close"
+                onClick={() => remove(first.id)}
+                aria-label={`Remove ${slot.label}`}
+              >
+                <i className="fas fa-trash" />
+              </button>
+            )}
+          </span>
+        )}
+      </figcaption>
+    </figure>
   )
 }
 

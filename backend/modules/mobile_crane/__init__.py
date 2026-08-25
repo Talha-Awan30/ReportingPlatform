@@ -1,1 +1,0 @@
-"""Mobile Crane inspection module."""

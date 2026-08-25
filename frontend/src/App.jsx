@@ -8,6 +8,8 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Modules from './pages/Modules'
 import ModuleDetail from './pages/ModuleDetail'
+import NewInspection from './pages/NewInspection'
+import InspectionSetDetail from './pages/InspectionSetDetail'
 import Reports from './pages/Reports'
 import ReportDetail from './pages/ReportDetail'
 import ReviewQueue from './pages/ReviewQueue'
@@ -45,6 +47,8 @@ export default function App() {
         <Route index element={<ProtectedRoute roles={STAFF}><Dashboard /></ProtectedRoute>} />
         <Route path="modules" element={<ProtectedRoute roles={STAFF}><Modules /></ProtectedRoute>} />
         <Route path="modules/:slug" element={<ProtectedRoute roles={STAFF}><ModuleDetail /></ProtectedRoute>} />
+        <Route path="modules/:slug/new" element={<ProtectedRoute roles={STAFF}><NewInspection /></ProtectedRoute>} />
+        <Route path="inspection-sets/:id" element={<InspectionSetDetail />} />
 
         <Route path="reports" element={<Reports />} />
         <Route path="reports/:id" element={<ReportDetail />} />

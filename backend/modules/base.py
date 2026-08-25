@@ -1,17 +1,23 @@
 """The contract every inspection module implements.
 
-A module describes one inspection item (elevator, overhead crane, forklift...).
-It owns its own folder under `modules/` containing:
+A module describes one service category (Elevator Inspection, Lifting
+Equipment, Vehicle Inspection...). It owns its own folder under `modules/`
+containing:
 
     modules/<slug>/
         module.py     - a MODULE = ModuleSpec(...) manifest (required)
         app.py        - a Flask Blueprint named `blueprint` (optional)
         models.py     - extra tables, if the module needs any (optional)
-        templates/    - the Word/HTML report templates for this item
-        static/       - icons or sample files for this item
+        templates/    - the Word/HTML report templates for this category
+        static/       - icons or sample files for this category
 
 The manifest is what the frontend reads to render the inspection form, so a new
-inspection item needs no frontend change - only a new folder here.
+service category needs no frontend change - only a new folder here.
+
+A module may also declare that one job covers SEVERAL units of the same kind
+(three elevators on one site, say). Then the inspector is asked "how many?"
+first, fills a shared title page once, and repeats the checklist per unit. See
+`supports_multiple` / `title_page` / `unit_details` / `photo_slots` below.
 """
 from dataclasses import dataclass, field
 
@@ -45,6 +51,30 @@ class Checkpoint:
             "allows_photos": self.allows_photos,
             "reference": self.reference,
             "default": self.default,
+        }
+
+
+@dataclass
+class PhotoSlot:
+    """A named place in the report where photographs belong.
+
+    The Elevator report, for example, ends with a fixed six-box photographic
+    presentation - Cabin, Machine Room, Pit Area, Shaft, Car top, Control Panel.
+    Declaring them here means the inspector uploads into labelled slots instead
+    of one undifferentiated pile, and the Word output can lay them out correctly.
+    """
+
+    key: str
+    label: str
+    required: bool = False
+    help_text: str = ""
+
+    def to_dict(self):
+        return {
+            "key": self.key,
+            "label": self.label,
+            "required": self.required,
+            "help_text": self.help_text,
         }
 
 
@@ -89,6 +119,25 @@ class ModuleSpec:
     enabled: bool = True
     order: int = 100
 
+    # ---------------------------------------------------------- multi-unit
+    # When True the inspector is asked how many units this visit covers, fills
+    # the title page once, then repeats the checklist for each unit.
+    supports_multiple: bool = False
+    unit_noun: str = "unit"          # singular, e.g. "elevator"
+    unit_noun_plural: str = "units"  # e.g. "elevators"
+    max_units: int = 20
+
+    # Shared cover-page fields, captured once per inspection set.
+    title_page: list = field(default_factory=list)
+    # Shared cover-page photographs.
+    title_page_photos: list = field(default_factory=list)
+    # The per-unit detail table that heads each unit's report.
+    unit_details: list = field(default_factory=list)
+    # Named photo slots filled in for every unit.
+    photo_slots: list = field(default_factory=list)
+    # Findings / conclusion fields that close each unit's report.
+    conclusion: list = field(default_factory=list)
+
     # Populated by the registry at import time.
     package: str = ""
     root_path: str = ""
@@ -102,9 +151,20 @@ class ModuleSpec:
         return next((cp for cp in self.checkpoints if cp.key == key), None)
 
     @property
+    def all_unit_fields(self):
+        """Every per-unit field: the detail table, the checklist, the conclusion."""
+        return list(self.unit_details) + self.checkpoints + list(self.conclusion)
+
+    @property
     def is_configured(self):
         """A module with no sections is a scaffold - the form is not built yet."""
         return bool(self.sections)
+
+    @property
+    def option_keys(self):
+        """Every dropdown list this module's fields refer to."""
+        fields = self.all_unit_fields + list(self.title_page)
+        return {f.options_key for f in fields if f.kind == "dropdown" and f.options_key}
 
     def to_dict(self, with_sections=True):
         data = {
@@ -120,7 +180,18 @@ class ModuleSpec:
             "is_configured": self.is_configured,
             "section_count": len(self.sections),
             "checkpoint_count": len(self.checkpoints),
+            "supports_multiple": self.supports_multiple,
+            "unit_noun": self.unit_noun,
+            "unit_noun_plural": self.unit_noun_plural,
+            "max_units": self.max_units,
+            "has_title_page": bool(self.title_page),
+            "photo_slot_count": len(self.photo_slots),
         }
         if with_sections:
             data["sections"] = [s.to_dict() for s in self.sections]
+            data["title_page"] = [c.to_dict() for c in self.title_page]
+            data["title_page_photos"] = [p.to_dict() for p in self.title_page_photos]
+            data["unit_details"] = [c.to_dict() for c in self.unit_details]
+            data["photo_slots"] = [p.to_dict() for p in self.photo_slots]
+            data["conclusion"] = [c.to_dict() for c in self.conclusion]
         return data

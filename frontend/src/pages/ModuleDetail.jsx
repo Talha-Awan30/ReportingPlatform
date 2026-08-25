@@ -34,9 +34,15 @@ export default function ModuleDetail() {
         subtitle={module.summary}
         crumbs={[{ label: 'Inspections', to: '/modules' }, { label: module.name }]}
         actions={
-          <button type="button" className="btn btn-cta" onClick={() => setStarting(true)}>
-            <i className="fas fa-plus" /> Start Inspection
-          </button>
+          module.has_title_page ? (
+            <Link to={`/modules/${slug}/new`} className="btn btn-cta">
+              <i className="fas fa-plus" /> Start Inspection
+            </Link>
+          ) : (
+            <button type="button" className="btn btn-cta" onClick={() => setStarting(true)}>
+              <i className="fas fa-plus" /> Start Inspection
+            </button>
+          )
         }
       />
 

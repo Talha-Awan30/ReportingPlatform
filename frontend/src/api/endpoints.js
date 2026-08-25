@@ -81,6 +81,26 @@ export const reportApi = {
   downloadUrl: (id) => `/api/reports/${id}/download`,
 }
 
+export const inspectionSetApi = {
+  list: (params) => unwrap(api.get('/inspection-sets', { params })),
+  get: (id) => unwrap(api.get(`/inspection-sets/${id}`)),
+  create: (payload) => unwrap(api.post('/inspection-sets', payload)),
+  update: (id, payload) => unwrap(api.patch(`/inspection-sets/${id}`, payload)),
+  addUnit: (id) => unwrap(api.post(`/inspection-sets/${id}/units`)),
+  remove: (id) => unwrap(api.delete(`/inspection-sets/${id}`)),
+  generate: (id, force) =>
+    unwrap(api.post(`/inspection-sets/${id}/generate`, null, { params: force ? { force: 1 } : {} })),
+  downloadUrl: (id) => `/api/inspection-sets/${id}/download`,
+  uploadPhotos: (id, files, slotKey, caption) => {
+    const form = new FormData()
+    Array.from(files).forEach((file) => form.append('files', file))
+    form.append('slot_key', slotKey)
+    if (caption) form.append('caption', caption)
+    return unwrap(api.post(`/inspection-sets/${id}/photos`, form))
+  },
+  deletePhoto: (id, photoId) => unwrap(api.delete(`/inspection-sets/${id}/photos/${photoId}`)),
+}
+
 export const userApi = {
   list: (params) => unwrap(api.get('/users', { params })),
   get: (id) => unwrap(api.get(`/users/${id}`)),

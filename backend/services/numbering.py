@@ -51,3 +51,24 @@ def next_job_number(year=None):
             highest = max(highest, int(tail))
 
     return f"{stem}{highest + 1:04d}"
+
+
+def next_set_number(prefix, year=None):
+    """Next inspection-set number, e.g. ELV-SET-2026-0007."""
+    from models import InspectionSet
+
+    year = year or date.today().year
+    stem = f"{prefix}-SET-{year}-"
+    rows = (
+        db.session.query(InspectionSet.set_number)
+        .filter(InspectionSet.set_number.like(f"{stem}%"))
+        .all()
+    )
+
+    highest = 0
+    for (number,) in rows:
+        tail = (number or "").rsplit("-", 1)[-1]
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+
+    return f"{stem}{highest + 1:04d}"

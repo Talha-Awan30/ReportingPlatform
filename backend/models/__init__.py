@@ -18,6 +18,7 @@ from .report import (  # noqa: F401
     ReportEventType,
 )
 from .alert import ExpiryAlert  # noqa: F401
+from .inspection_set import InspectionSet, InspectionSetPhoto  # noqa: F401
 
 __all__ = [
     "BaseModel",
@@ -39,4 +40,6 @@ __all__ = [
     "ReportEvent",
     "ReportEventType",
     "ExpiryAlert",
+    "InspectionSet",
+    "InspectionSetPhoto",
 ]

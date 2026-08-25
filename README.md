@@ -68,10 +68,13 @@ ReportingPlatform/
 │   ├── modules/                ← ONE FOLDER PER INSPECTION ITEM
 │   │   ├── base.py             ModuleSpec / Section / Checkpoint
 │   │   ├── blueprint_factory.py the endpoints every module gets free
-│   │   ├── _template/          copy this to start a new item
-│   │   ├── elevator/           fully built out (85 checkpoints)
-│   │   └── overhead_crane/ mobile_crane/ forklift/ chain_block/
-│   │       wire_rope_sling/ man_lift/ escalator/     ← scaffolded
+│   │   ├── _template/          copy this to start a new category
+│   │   ├── lifting_equipment/      14 equipment types   ← scaffolded
+│   │   ├── lifting_accessories/    11 equipment types   ← scaffolded
+│   │   ├── elevator_inspection/     3 equipment types   ← built out (85 checkpoints)
+│   │   ├── racking_system/                              ← scaffolded
+│   │   ├── tower_inspection/                            ← scaffolded
+│   │   └── vehicle_inspection/     10 equipment types   ← scaffolded
 │   ├── services/               docx generation, storage, mail, expiry scan
 │   └── utils/                  errors, auth decorators, validation, paging
 │
@@ -256,9 +259,21 @@ Against the phase plan in `website material/`:
 | 3 | Review & approval — reviewer queue, return for correction, approval trail | Built |
 | 4 | Client portal & alerts — client login, approval, record search, expiry emails | Built |
 
-Per-item checkpoint lists are the remaining work: **Elevator** is fully built out
-from the approved check-list; the other seven modules are scaffolded and waiting
-for their check-lists.
+The six service categories come from *Service Portfolio and Equipment list.docx*
+and are what an inspector picks from when starting a report:
+
+| Category | Prefix | Equipment types | Checkpoints |
+|---|---|---|---|
+| Lifting Equipment | `LEQ` | 14 | scaffolded |
+| Lifting Accessories | `LAC` | 11 | scaffolded |
+| Elevator Inspection | `ELV` | 3 | **85, built out** |
+| Racking System | `RCK` | 1 | scaffolded |
+| Tower Inspection | `TWR` | 1 | scaffolded |
+| Vehicle Inspection | `VEH` | 10 | scaffolded |
+
+Per-category checkpoint lists are the remaining work: **Elevator Inspection** is
+fully built out from the approved check-list; the other five are scaffolded and
+waiting for theirs.
 
 Not in scope yet: management dashboard trends, mobile/offline entry, report QR
 verification, bulk equipment import.

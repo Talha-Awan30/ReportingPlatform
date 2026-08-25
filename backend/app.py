@@ -24,6 +24,7 @@ CORE_BLUEPRINTS = [
     ("core.jobs", "/api/jobs"),
     ("core.equipment", "/api/equipment"),
     ("core.reports", "/api/reports"),
+    ("core.inspection_sets", "/api/inspection-sets"),
     ("core.users", "/api/users"),
     ("core.masterlists", "/api/master-lists"),
     ("core.alerts", "/api/alerts"),

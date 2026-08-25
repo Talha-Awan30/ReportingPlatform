@@ -1,1 +1,0 @@
-"""Escalator & Travelator inspection module."""
