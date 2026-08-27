@@ -77,7 +77,14 @@ def make_blueprint(spec, name=None):
     @roles_required()
     def form_schema():
         """Manifest plus the live dropdown options behind every checkpoint."""
-        return {"module": spec.to_dict(), "options": resolve_options(spec)}
+        from flask import current_app
+
+        return {
+            "module": spec.to_dict(),
+            "options": resolve_options(spec),
+            # The form shows required markers only when the backend enforces them.
+            "enforce_required": current_app.config.get("ENFORCE_REQUIRED_FIELDS", False),
+        }
 
     @bp.get("/stats")
     @roles_required()

@@ -62,7 +62,14 @@ def module_form_schema(slug):
     Mirrors the per-module blueprint endpoint so the frontend can load a form
     without knowing whether the module ships its own app.py.
     """
+    from flask import current_app
+
     spec = get_module(slug)
     if spec is None:
         raise ApiError(f"Unknown inspection module '{slug}'.", 404, "module_not_found")
-    return {"module": spec.to_dict(), "options": resolve_options(spec)}
+    return {
+        "module": spec.to_dict(),
+        "options": resolve_options(spec),
+        # The form shows required markers only when the backend enforces them.
+        "enforce_required": current_app.config.get("ENFORCE_REQUIRED_FIELDS", False),
+    }

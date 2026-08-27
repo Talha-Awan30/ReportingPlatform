@@ -39,6 +39,9 @@ class Checkpoint:
     # Reference to the standard or clause this checkpoint tests.
     reference: str = ""
     default: object = None
+    # Word output: False prints the option's short label ("Satisfactory"),
+    # True prints its full approved clause. Check-point cells want the label.
+    use_report_text: bool = False
 
     def to_dict(self):
         return {
@@ -51,6 +54,7 @@ class Checkpoint:
             "allows_photos": self.allows_photos,
             "reference": self.reference,
             "default": self.default,
+            "use_report_text": self.use_report_text,
         }
 
 
@@ -68,6 +72,9 @@ class PhotoSlot:
     label: str
     required: bool = False
     help_text: str = ""
+    # When set, the image is dropped into the title-page table row whose first
+    # cell reads this text (e.g. "QR Code") instead of into a picture frame.
+    cell_label: str = ""
 
     def to_dict(self):
         return {
@@ -75,6 +82,7 @@ class PhotoSlot:
             "label": self.label,
             "required": self.required,
             "help_text": self.help_text,
+            "cell_label": self.cell_label,
         }
 
 
@@ -112,6 +120,8 @@ class ModuleSpec:
     default_validity_months: int = 12
     # Word template filename, resolved inside the module's templates/ folder.
     docx_template: str = "report_template.docx"
+    # Separate cover-page template for a multi-unit set (optional).
+    docx_title_template: str = ""
     sections: list = field(default_factory=list)
     # Equipment type names this module handles - used to seed the register.
     equipment_types: list = field(default_factory=list)
@@ -137,6 +147,15 @@ class ModuleSpec:
     photo_slots: list = field(default_factory=list)
     # Findings / conclusion fields that close each unit's report.
     conclusion: list = field(default_factory=list)
+
+    # Keys from `unit_details` that are normally identical for every unit on a
+    # visit - client, site, make, model... These are carried forward so the
+    # inspector types them once instead of once per unit. Anything not listed
+    # here (the ID, the serial number) is always entered per unit.
+    shared_unit_fields: list = field(default_factory=list)
+    # Maps a title-page key onto a unit_details key, so the cover page seeds
+    # each unit's particulars table.
+    title_to_unit: dict = field(default_factory=dict)
 
     # Populated by the registry at import time.
     package: str = ""
@@ -186,6 +205,7 @@ class ModuleSpec:
             "max_units": self.max_units,
             "has_title_page": bool(self.title_page),
             "photo_slot_count": len(self.photo_slots),
+            "shared_unit_fields": list(self.shared_unit_fields),
         }
         if with_sections:
             data["sections"] = [s.to_dict() for s in self.sections]

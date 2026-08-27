@@ -51,8 +51,6 @@ TITLE_PAGE = [
     _text("equipment_identification", "Equipment Identification",
           help_text='e.g. "Passenger Lift"'),
     Checkpoint(key="survey_date", label="Survey Date", kind="date", options_key=""),
-    _text("qr_code", "QR Code", required=False,
-          help_text="Verification reference printed on the cover. Leave blank if not used."),
     _text("prepared_by_name", "Prepared by - name"),
     _text("prepared_by_designation", "Prepared by - designation"),
     _text("reviewed_by_name", "Reviewed by - name", required=False),
@@ -60,10 +58,12 @@ TITLE_PAGE = [
 ]
 
 TITLE_PAGE_PHOTOS = [
-    PhotoSlot("cover_photo", "Cover photograph", required=False,
-              help_text="Main image on the title page. Shared by every elevator in this visit."),
-    PhotoSlot("site_photo", "Site photograph", required=False,
-              help_text="Optional second cover image."),
+    PhotoSlot("cover_photo", "Cover photograph",
+              help_text="Left picture on the title page. Shared by every elevator in this visit."),
+    PhotoSlot("site_photo", "Site photograph",
+              help_text="Right picture on the title page."),
+    PhotoSlot("qr_code", "QR Code", cell_label="QR Code",
+              help_text="Dropped into the QR Code row on the cover page."),
 ]
 
 # ---------------------------------------------------------------------------
@@ -94,13 +94,14 @@ UNIT_DETAILS = [
 # PHOTOGRAPHIC PRESENTATION - the fixed six boxes that close each report.
 # From "Elevator Report Format.docx", table 14.
 # ---------------------------------------------------------------------------
+# All optional - an inspector may not be able to reach every area on a visit.
 PHOTO_SLOTS = [
-    PhotoSlot("cabin", "Cabin", required=True),
-    PhotoSlot("machine_room", "Machine Room", required=True),
-    PhotoSlot("pit_area", "Pit Area", required=True),
-    PhotoSlot("shaft", "Shaft", required=True),
-    PhotoSlot("car_top", "Car top", required=True),
-    PhotoSlot("control_panel", "Control Panel", required=True),
+    PhotoSlot("cabin", "Cabin"),
+    PhotoSlot("machine_room", "Machine Room"),
+    PhotoSlot("pit_area", "Pit Area"),
+    PhotoSlot("shaft", "Shaft"),
+    PhotoSlot("car_top", "Car top"),
+    PhotoSlot("control_panel", "Control Panel"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,8 @@ CONCLUSION_FIELDS = [
                options_key="",
                help_text="Six months after a satisfactory inspection; not applicable if unsatisfactory."),
     Checkpoint(key="conclusion", label="Conclusion", kind="dropdown", options_key=CONCLUSION,
-               help_text="The closing statement printed on the report."),
+               use_report_text=True,
+               help_text="The closing statement printed in full on the report."),
     _text("inspector_signature_name", "Inspected by - name on the signature block",
           required=False),
 ]
@@ -128,6 +130,8 @@ MODULE = ModuleSpec(
     icon="fa-elevator",
     report_prefix="ELV",
     default_validity_months=6,
+    # One template holds both halves: the cover page, a section break, then the
+    # report body. It is split at that break and the body repeats per lift.
     docx_template="elevator_inspection_report_template.docx",
     equipment_types=[
         'Passenger / Cargo Lift',
@@ -145,6 +149,23 @@ MODULE = ModuleSpec(
     title_page=TITLE_PAGE,
     title_page_photos=TITLE_PAGE_PHOTOS,
     unit_details=UNIT_DETAILS,
+
+    # Typed once, carried to every lift on the visit. Identification, serial
+    # number, levels and status stay per-lift because they genuinely differ.
+    shared_unit_fields=[
+        "name_of_client",
+        "make",
+        "model",
+        "capacity",
+        "location",
+        "type",
+        "inspection_date",
+        "reference_code",
+    ],
+    title_to_unit={
+        "client": "name_of_client",
+        "survey_date": "inspection_date",
+    },
     photo_slots=PHOTO_SLOTS,
     conclusion=CONCLUSION_FIELDS,
 
@@ -315,28 +336,6 @@ MODULE = ModuleSpec(
                     kind="text",
                     required=False,
                 ),
-            ],
-        ),
-        Section(
-            key="findings",
-            title="Findings & Conclusion",
-            description="Free-text observations that carry straight into the Word report.",
-            checkpoints=[
-                Checkpoint(key="major_findings", label="Major findings", kind="textarea", required=False),
-                Checkpoint(
-                    key="minor_findings",
-                    label="Minor findings (area of improvement)",
-                    kind="textarea",
-                    required=False,
-                ),
-                Checkpoint(
-                    key="reference_code",
-                    label="Reference code for inspection",
-                    kind="text",
-                    required=False,
-                    default="ASME A17.1 / A17.2 / EN-81",
-                ),
-                Checkpoint(key="levels", label="Number of levels served", kind="number", required=False),
             ],
         ),
     ],

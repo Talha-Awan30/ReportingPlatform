@@ -21,12 +21,36 @@ from services.storage import generated_dir, photo_path, set_photo_path
 log = logging.getLogger(__name__)
 
 
-def template_path(spec):
-    """Absolute path to a module's Word template, or None if it is not there."""
+def template_path(spec, name=None):
+    """Absolute path to one of a module's Word templates, or None if absent."""
     if not spec or not spec.root_path:
         return None
-    path = os.path.join(spec.root_path, "templates", spec.docx_template)
+    filename = name or spec.docx_template
+    if not filename:
+        return None
+    path = os.path.join(spec.root_path, "templates", filename)
     return path if os.path.exists(path) else None
+
+
+def _is_docxtpl(path):
+    """True when the template carries Jinja tags rather than blank cells.
+
+    The approved SGS documents are ordinary Word files with empty cells, so they
+    are filled in place by services.sgs_docx. A template authored with {{ }}
+    placeholders is rendered by docxtpl instead.
+    """
+    if not path:
+        return False
+    try:
+        from docx import Document
+
+        doc = Document(path)
+        blob = " ".join(p.text for p in doc.paragraphs)
+        blob += " ".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
+        return "{{" in blob or "{%" in blob
+    except Exception:
+        log.exception("Could not inspect template %s", path)
+        return False
 
 
 # ============================================================================
@@ -40,26 +64,40 @@ def build_context(report, spec, options=None):
     options = options or {}
     answers = report.data or {}
 
-    def label_for(field, raw_value):
-        """Turn a stored option value into its approved report wording."""
+    def _option(field, raw_value):
         if field.kind != "dropdown" or raw_value in (None, ""):
-            return raw_value
+            return None
         bucket = options.get(field.options_key) or {}
-        for option in bucket.get("options", []):
-            if option["value"] == raw_value:
-                return option.get("report_text") or option["label"]
-        return raw_value
+        return next((o for o in bucket.get("options", []) if o["value"] == raw_value), None)
+
+    def label_for(field, raw_value):
+        """What this answer prints in the Word report.
+
+        A check-point cell wants the option's short label - "Satisfactory" - so
+        the box stays one line. Only a field flagged `use_report_text` (the
+        closing Conclusion) prints the full approved clause.
+        """
+        option = _option(field, raw_value)
+        if option is None:
+            return raw_value
+        if getattr(field, "use_report_text", False):
+            return option.get("report_text") or option["label"]
+        return option["label"]
 
     def render_field(field):
         entry = answers.get(field.key) or {}
         if not isinstance(entry, dict):
             entry = {"value": entry}
         raw = entry.get("value")
+        option = _option(field, raw)
         return {
             "key": field.key,
             "label": field.label,
             "value": raw,
             "display": label_for(field, raw) if field.kind == "dropdown" else raw,
+            # The short label, always - used for the one-line check-point cells.
+            "short": option["label"] if option else raw,
+            "report_text": (option.get("report_text") if option else None) or "",
             "remarks": entry.get("remarks", ""),
         }
 
@@ -162,13 +200,31 @@ def generate(report, spec, options=None):
     out_path = os.path.join(generated_dir(), out_name)
 
     source = template_path(spec)
-    if source:
+    if source and _is_docxtpl(source):
         _render_template(source, out_path, context)
+    elif source:
+        # The approved SGS document, filled in place. A single report shows the
+        # report body only - the cover belongs to the whole visit.
+        from services import sgs_docx
+
+        template = (
+            sgs_docx.load_unit_part(source)
+            if sgs_docx.has_embedded_title_page(source)
+            else source
+        )
+        doc = sgs_docx.fill_unit_report(template, context, spec, _title_page_of(report))
+        doc.save(out_path)
     else:
         log.info("No Word template for module '%s' - building fallback document", report.module_slug)
         _render_fallback(out_path, context, spec)
 
     return out_name
+
+
+def _title_page_of(report):
+    """The shared cover values, when this report belongs to an inspection set."""
+    record = getattr(report, "inspection_set", None)
+    return _flatten(record.title_page) if record else {}
 
 
 def generate_set(record, spec):
@@ -180,8 +236,10 @@ def generate_set(record, spec):
     out_path = os.path.join(generated_dir(), out_name)
 
     source = template_path(spec)
-    if source:
+    if source and _is_docxtpl(source):
         _render_set_template(source, out_path, record, spec, options)
+    elif source:
+        _render_set_sgs(out_path, record, spec, options, source)
     else:
         log.info(
             "No Word template for module '%s' - building fallback set document", record.module_slug
@@ -189,6 +247,42 @@ def generate_set(record, spec):
         _render_set_fallback(out_path, record, spec, options)
 
     return out_name
+
+
+def _render_set_sgs(out_path, record, spec, options, unit_template):
+    """The approved SGS document: title page once, then one report per lift.
+
+    The template carries both halves separated by a section break, so it is
+    split once and the report half is re-filled for each unit.
+    """
+    from services import sgs_docx
+
+    context = _set_context(record, spec, options)
+    parts = []
+
+    if sgs_docx.has_embedded_title_page(unit_template):
+        # Cover page and report body both live in this one template.
+        cover = sgs_docx.load_title_part(unit_template)
+        parts.append(
+            sgs_docx.fill_title_page(cover, context["title_page"], context["title_page_photos"], spec)
+        )
+        load_unit = lambda: sgs_docx.load_unit_part(unit_template)  # noqa: E731
+    else:
+        # Older layout: a separate cover template beside the report template.
+        separate = template_path(spec, spec.docx_title_template)
+        if separate:
+            parts.append(
+                sgs_docx.fill_title_page(separate, context["title_page"], context["title_page_photos"], spec)
+            )
+        load_unit = lambda: unit_template  # noqa: E731
+
+    for unit in context["units"]:
+        parts.append(sgs_docx.fill_unit_report(load_unit(), unit, spec, context["title_page"]))
+
+    if not parts:
+        raise RuntimeError("No document parts were produced")
+
+    sgs_docx.compose(parts, out_path)
 
 
 # ============================================================================

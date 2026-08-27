@@ -133,8 +133,13 @@ def get_report(report_id):
     report = _load(report_id)
     spec = get_module(report.module_slug)
 
+    from core.inspection_sets.routes import prefill_for
+
     payload = report.to_dict(detail=True)
     payload["module"] = spec.to_dict() if spec else None
+    # Values already typed on an earlier unit of the same visit, so the
+    # inspector does not enter the client, site, make and model every time.
+    payload["prefill"] = prefill_for(report, spec)
     return {"report": payload}
 
 
@@ -248,9 +253,31 @@ def submit_report(report_id):
     report.log_event(ReportEventType.SUBMITTED, user)
 
     _generate(report, spec, user)
+    message = "Submitted for review."
+
+    # Once every unit on the visit is in, build the combined document so the
+    # title page and all units are ready to download without another click.
+    record = report.inspection_set
+    if record is not None:
+        db.session.flush()
+        if all(r.status is not ReportStatus.DRAFT for r in record.reports):
+            try:
+                record.docx_path = docx_generator.generate_set(record, spec)
+                record.generated_at = utcnow()
+                message = (
+                    f"Submitted. All {len(record.reports)} {spec.unit_noun_plural} are in - "
+                    "the combined report is ready to download."
+                )
+            except Exception:  # noqa: BLE001 - never block a submit on the document
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Could not build the combined report for set %s", record.set_number
+                )
+
     db.session.commit()
 
-    return {"report": report.to_dict(detail=True), "message": "Submitted for review."}
+    return {"report": report.to_dict(detail=True), "message": message}
 
 
 @bp.post("/<int:report_id>/return")
@@ -452,8 +479,16 @@ def _generate(report, spec, user):
 
 
 def _assert_required_answered(report, spec):
-    """Block submission while required checkpoints are still blank."""
+    """Block submission while required checkpoints are still blank.
+
+    Skipped entirely when ENFORCE_REQUIRED_FIELDS is off, so a partially filled
+    report can still be submitted and generated while the form is being tested.
+    """
+    from flask import current_app
+
     if not spec or not spec.is_configured:
+        return
+    if not current_app.config.get("ENFORCE_REQUIRED_FIELDS", False):
         return
 
     answers = report.data or {}

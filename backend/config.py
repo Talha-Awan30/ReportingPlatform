@@ -50,6 +50,11 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
     MAIL_SENDER = os.getenv("MAIL_SENDER", "no-reply@sgs.com")
 
+    # --- Report validation ----------------------------------------------
+    # When False a report can be submitted with check-points left blank, which
+    # is what you want while testing the form. Set true for a real deployment.
+    ENFORCE_REQUIRED_FIELDS = _bool("ENFORCE_REQUIRED_FIELDS", False)
+
     # --- Certification expiry alerts ------------------------------------
     ALERT_THRESHOLDS = sorted(
         (int(d) for d in os.getenv("ALERT_THRESHOLDS", "60,30,7").split(",") if d.strip()),

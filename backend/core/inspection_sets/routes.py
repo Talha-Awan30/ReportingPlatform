@@ -145,6 +145,8 @@ def create_set():
     db.session.add(record)
     db.session.flush()
 
+    seeded = seed_from_title_page(spec, record.title_page)
+
     for index in range(1, unit_count + 1):
         report = Report(
             report_number=next_report_number(spec.report_prefix),
@@ -155,7 +157,7 @@ def create_set():
             inspector_id=user.id,
             status=ReportStatus.DRAFT,
             inspection_date=job.inspection_date,
-            data={},
+            data=dict(seeded),
         )
         db.session.add(report)
         db.session.flush()
@@ -199,6 +201,10 @@ def add_unit(set_id):
 
     user = current_user()
     sequence = max((r.sequence for r in record.reports), default=0) + 1
+
+    data = seed_from_title_page(spec, record.title_page)
+    data.update(shared_values_from(record, spec, before_sequence=sequence))
+
     report = Report(
         report_number=next_report_number(spec.report_prefix),
         module_slug=spec.slug,
@@ -208,7 +214,7 @@ def add_unit(set_id):
         inspector_id=user.id,
         status=ReportStatus.DRAFT,
         inspection_date=record.job.inspection_date if record.job else None,
-        data={},
+        data=data,
     )
     db.session.add(report)
     db.session.flush()
@@ -399,3 +405,63 @@ def resolve_equipment_for(report, spec):
     db.session.flush()
     report.equipment_id = equipment.id
     return equipment
+
+
+def seed_from_title_page(spec, title_page):
+    """Pre-fill the particulars a unit inherits from the cover page."""
+    if not spec or not title_page:
+        return {}
+
+    seeded = {}
+    for title_key, unit_key in (spec.title_to_unit or {}).items():
+        entry = title_page.get(title_key)
+        value = entry.get("value") if isinstance(entry, dict) else entry
+        if value not in (None, ""):
+            seeded[unit_key] = {"value": value}
+
+    # Manifest defaults, e.g. the standard reference code.
+    for field in spec.unit_details:
+        if field.key not in seeded and field.default not in (None, ""):
+            seeded[field.key] = {"value": field.default}
+
+    return seeded
+
+
+def shared_values_from(record, spec, before_sequence=None):
+    """Values an inspector already typed on an earlier unit of this visit.
+
+    Only the keys the manifest marks as shared - client, site, make, model and
+    so on. The identification and serial number are always per unit.
+    """
+    if not spec or not spec.shared_unit_fields:
+        return {}
+
+    earlier = [
+        r for r in sorted(record.reports, key=lambda r: r.sequence)
+        if before_sequence is None or r.sequence < before_sequence
+    ]
+
+    collected = {}
+    for report in earlier:
+        for key in spec.shared_unit_fields:
+            entry = (report.data or {}).get(key)
+            value = entry.get("value") if isinstance(entry, dict) else entry
+            if value not in (None, "", []):
+                collected[key] = {"value": value}
+    return collected
+
+
+def prefill_for(report, spec):
+    """Suggested values for a draft unit, taken from the units before it."""
+    if report.status is not ReportStatus.DRAFT or report.inspection_set is None:
+        return {}
+
+    suggestions = shared_values_from(report.inspection_set, spec, before_sequence=report.sequence)
+    answers = report.data or {}
+
+    # Never overwrite something the inspector has already typed.
+    return {
+        key: value
+        for key, value in suggestions.items()
+        if not (answers.get(key) or {}).get("value")
+    }
