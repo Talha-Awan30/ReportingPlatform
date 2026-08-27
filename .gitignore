@@ -8,8 +8,8 @@ backend/instance/
 backend/.env
 backend/uploads/
 backend/generated/
-*.db
-*.sqlite3
+#*.db
+#*.sqlite3
 
 # ---- Node / frontend ----
 node_modules/
