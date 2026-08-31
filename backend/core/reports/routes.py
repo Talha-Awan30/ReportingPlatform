@@ -140,6 +140,24 @@ def get_report(report_id):
     # Values already typed on an earlier unit of the same visit, so the
     # inspector does not enter the client, site, make and model every time.
     payload["prefill"] = prefill_for(report, spec)
+
+    # The other units on the same visit, so the form can offer "next unit"
+    # instead of sending the inspector back to a list to find it.
+    record = report.inspection_set
+    payload["set_units"] = (
+        [
+            {
+                "id": r.id,
+                "sequence": r.sequence,
+                "report_number": r.report_number,
+                "status": r.status.value,
+                "is_editable": r.is_editable,
+            }
+            for r in sorted(record.reports, key=lambda r: r.sequence)
+        ]
+        if record
+        else []
+    )
     return {"report": payload}
 
 

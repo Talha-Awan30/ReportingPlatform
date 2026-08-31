@@ -284,6 +284,11 @@ def fill_title_page(doc_or_path, values, photos=None, spec=None):
     """Write the visit's details onto the approved cover page."""
     doc = _as_doc(doc_or_path)
 
+    # The template's own picture frames, captured NOW. A picture written into a
+    # table cell later (the QR code) would otherwise join `inline_shapes` and,
+    # because that table sits above the frames, shift every later match by one.
+    frames = list(doc.inline_shapes)
+
     # A photo slot may claim a row of the details table (the QR Code), in
     # which case that row takes an image instead of text.
     slot_by_label = {
@@ -331,15 +336,164 @@ def fill_title_page(doc_or_path, values, photos=None, spec=None):
                 set_cell(target[1], _join(values.get("reviewed_by_name"),
                                           values.get("reviewed_by_designation")))
 
-    frame_photos = [
-        p for p in (photos or [])
-        if p.get("slot") not in {s.key for s in slot_by_label.values()}
-    ]
-    replace_cover_photos(doc, frame_photos)
+    frame_slots = [s for s in (spec.title_page_photos if spec else []) if not s.cell_label]
+    apply_cover_photos(doc, frames, frame_slots, photo_by_slot, photos)
+    _move_frames_below_header(doc)
     return doc
 
 
-def _set_cell_image(cell, path, width_mm=28):
+def _move_frames_below_header(doc):
+    """Put the cover photographs in the gap under the report header.
+
+    The template leaves them below the client details table, which prints them
+    low on the page with a blank band above. Moving the paragraph that carries
+    them directly after the header table fills that space instead.
+    """
+    body = doc.element.body
+
+    header = next(
+        (
+            child
+            for child in body
+            if child.tag == qn("w:tbl")
+            and TITLE_MARKER in " ".join(child.itertext()).lower()
+        ),
+        None,
+    )
+    frame_para = next(
+        (
+            child
+            for child in body
+            if child.tag == qn("w:p") and child.find(".//" + qn("a:blip")) is not None
+        ),
+        None,
+    )
+
+    if header is None or frame_para is None:
+        return False
+
+    # lxml moves the element rather than copying it.
+    header.addnext(frame_para)
+
+    # The template left blank paragraphs where the pictures used to be. With
+    # the frames moved up they would print as a band of white, so drop the
+    # empty ones between the photographs and the next table.
+    node = frame_para.getnext()
+    while node is not None and node.tag == qn("w:p"):
+        following = node.getnext()
+        empty = (
+            not "".join(node.itertext()).strip()
+            and node.find(".//" + qn("a:blip")) is None
+            and node.find(".//" + qn("w:sectPr")) is None
+        )
+        if not empty:
+            break
+        node.getparent().remove(node)
+        node = following
+
+    return True
+
+
+def apply_cover_photos(doc, frames, frame_slots, photo_by_slot, all_photos=None):
+    """Fill the cover's picture frames, and clear the ones left unused.
+
+    Each frame belongs to one manifest slot, in declared order, so the
+    "Cover photograph" upload always lands in the first frame. A frame whose
+    slot was not filled in is removed outright, so the template's sample
+    photograph never survives into a real report.
+    """
+    if frame_slots:
+        pairs = [(frame, photo_by_slot.get(slot.key)) for frame, slot in zip(frames, frame_slots)]
+    else:
+        # No manifest to go on: fall back to filling the frames in order.
+        usable = [p for p in (all_photos or []) if p.get("path") and os.path.exists(p["path"])]
+        pairs = list(zip(frames, usable + [None] * len(frames)))
+
+    for frame, photo in pairs:
+        if photo and photo.get("path") and os.path.exists(photo["path"]):
+            _swap_frame_image(doc, frame, photo["path"])
+        else:
+            _remove_frame(frame)
+
+
+def _set_cell_image(cell, path, width_mm=18):
+    """Replace a cell's contents with a single picture, e.g. the QR code."""
+    from docx.shared import Mm
+
+    for extra in cell.paragraphs[1:]:
+        extra._element.getparent().remove(extra._element)
+    paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+    for run in list(paragraph.runs):
+        run._element.getparent().remove(run._element)
+    paragraph.add_run().add_picture(path, width=Mm(width_mm))
+
+
+# The cover photographs are sized to fit inside this box, keeping their own
+# proportions. Two of them then sit comfortably side by side on the page.
+COVER_MAX_W_MM = 55
+COVER_MAX_H_MM = 42
+
+
+def _swap_frame_image(doc, shape, path):
+    """Point one picture frame at a new image, upright and sized to fit."""
+    from docx.shared import Mm
+
+    try:
+        # A fresh image part carries the correct content type and extension,
+        # which swapping the raw bytes of the template's part would not.
+        rid, image = doc.part.get_or_add_image(path)
+        pic = shape._inline.graphic.graphicData.pic
+        pic.blipFill.blip.embed = rid
+
+        # The template's frames are rotated 90 degrees to suit the sample
+        # photographs. An uploaded picture is already the right way up, so the
+        # rotation and any flip have to go or it prints on its side.
+        _clear_rotation(pic)
+
+        # Fit inside the box rather than filling the template's frame, so a
+        # portrait photo is not blown up to half a page.
+        ratio = (image.height / image.width) if image.width else 1
+        width = Mm(COVER_MAX_W_MM)
+        height = int(width * ratio)
+        if height > Mm(COVER_MAX_H_MM):
+            height = Mm(COVER_MAX_H_MM)
+            width = int(height / ratio) if ratio else Mm(COVER_MAX_W_MM)
+
+        shape.width = int(width)
+        shape.height = int(height)
+        return True
+    except Exception:  # noqa: BLE001 - a bad image must not lose the report
+        log.exception("Could not place cover photograph %s", path)
+        return False
+
+
+def _clear_rotation(pic):
+    """Drop any rotation or flip the template applied to a picture frame."""
+    for xfrm in pic.iter(qn("a:xfrm")):
+        for attribute in ("rot", "flipH", "flipV"):
+            if xfrm.get(attribute) is not None:
+                del xfrm.attrib[attribute]
+
+
+def _remove_frame(shape):
+    """Delete an unused picture frame so no sample image is left behind."""
+    try:
+        element = shape._inline
+        # Walk up to the run that carries the drawing and drop the whole run.
+        node = element
+        while node is not None and node.tag != qn("w:r"):
+            node = node.getparent()
+        target = node if node is not None else element
+        parent = target.getparent()
+        if parent is not None:
+            parent.remove(target)
+        return True
+    except Exception:  # noqa: BLE001
+        log.exception("Could not remove an unused cover frame")
+        return False
+
+
+def _set_cell_image(cell, path, width_mm=18):
     """Replace a cell's contents with a single picture, e.g. the QR code."""
     from docx.shared import Mm
 
