@@ -36,7 +36,10 @@ class Config:
     # --- Uploads --------------------------------------------------------
     UPLOAD_FOLDER = os.path.join(BASE_DIR, os.getenv("UPLOAD_FOLDER", "uploads"))
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH_MB", "32")) * 1024 * 1024
-    ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+    ALLOWED_IMAGE_EXTENSIONS = {
+        "png", "jpg", "jpeg", "jfif", "jpe", "pjpeg", "pjp",
+        "gif", "webp", "bmp", "tif", "tiff",
+    }
 
     # --- Generated reports ----------------------------------------------
     GENERATED_FOLDER = os.path.join(BASE_DIR, "generated")

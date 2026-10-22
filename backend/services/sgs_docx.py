@@ -68,6 +68,21 @@ def set_cell(cell, text, like=None):
         _copy_run_format(like, cell.paragraphs[0])
 
 
+def set_cell_font(cell, name, size_pt, bold=False):
+    """Give every run in a cell one font, size and weight."""
+    from docx.shared import Pt
+
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            run.font.name = name
+            # font.name covers Latin text only; set the other scripts too.
+            fonts = run._r.get_or_add_rPr().get_or_add_rFonts()
+            for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+                fonts.set(qn(attr), name)
+            run.font.size = Pt(size_pt)
+            run.bold = bold
+
+
 def _copy_run_format(source_cell, target_paragraph):
     """Copy font name/size/colour from a source cell's first run."""
     source_run = next(
@@ -104,6 +119,40 @@ def replace_in_paragraph(paragraph, mapping):
         set_text(paragraph, replaced)
 
 
+def _image_stream(path, aspect=None):
+    """Any uploaded picture as a JPEG/PNG stream Word can embed.
+
+    Applies the EXIF rotation phone cameras rely on. With `aspect`
+    (width / height) the picture is centre-cropped to exactly that shape, so it
+    fills its box without being stretched or leaving gaps.
+    """
+    import io
+
+    from PIL import Image, ImageOps
+
+    image = Image.open(path)
+    rotated = image.getexif().get(0x0112, 1) not in (0, 1)  # EXIF Orientation
+    if not aspect and not rotated and image.format in ("JPEG", "PNG"):
+        # Already embeddable as it is - keep the original bytes untouched.
+        with open(path, "rb") as handle:
+            return io.BytesIO(handle.read())
+
+    if rotated:
+        image = ImageOps.exif_transpose(image)
+    if aspect:
+        width = min(image.width, 1600)
+        image = ImageOps.fit(image, (width, max(1, round(width / aspect))), Image.LANCZOS)
+
+    stream = io.BytesIO()
+    transparent = image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info)
+    if transparent:
+        image.convert("RGBA").save(stream, "PNG")
+    else:
+        image.convert("RGB").save(stream, "JPEG", quality=88)
+    stream.seek(0)
+    return stream
+
+
 def add_image_to_cell(cell, path, width_mm=75):
     """Append a picture underneath whatever label the cell already carries."""
     from docx.shared import Mm
@@ -111,8 +160,138 @@ def add_image_to_cell(cell, path, width_mm=75):
     if not path or not os.path.exists(path):
         return False
     paragraph = cell.add_paragraph()
-    paragraph.add_run().add_picture(path, width=Mm(width_mm))
+    paragraph.add_run().add_picture(_image_stream(path), width=Mm(width_mm))
     return True
+
+
+# Space the label line under each photo needs, and breathing room around it.
+PHOTO_LABEL_TWIPS = 330
+PHOTO_PAD_TWIPS = 120
+
+
+def photo_grid_box(table):
+    """One picture size (EMU) that fits every cell of the photo grid.
+
+    Taken from the template's own column widths and row heights, so every
+    photograph prints at the same size whatever shape it was uploaded in.
+    """
+    tbl_pr = table._tbl.tblPr
+    margins = 101 + 49
+    if tbl_pr is not None:
+        mar = tbl_pr.find(qn("w:tblCellMar"))
+        if mar is not None:
+            margins = sum(
+                int(side.get(qn("w:w"), 0))
+                for side in mar
+                if side.tag in (qn("w:left"), qn("w:right"), qn("w:start"), qn("w:end"))
+            )
+
+    widths = [int(c.get(qn("w:w"))) for c in table._tbl.tblGrid.findall(qn("w:gridCol"))]
+    heights = []
+    for row in table.rows:
+        tr_h = row._tr.find("./" + qn("w:trPr") + "/" + qn("w:trHeight"))
+        if tr_h is not None and tr_h.get(qn("w:val")):
+            heights.append(int(tr_h.get(qn("w:val"))))
+
+    width = min(widths or [4500]) - margins - PHOTO_PAD_TWIPS
+    height = min(heights or [3400]) - PHOTO_LABEL_TWIPS - PHOTO_PAD_TWIPS
+    return width * 635, height * 635
+
+
+def lock_photo_rows(table):
+    """Fix the grid's row heights so no picture can grow its row."""
+    for row in table.rows:
+        tr_h = row._tr.find("./" + qn("w:trPr") + "/" + qn("w:trHeight"))
+        if tr_h is not None:
+            tr_h.set(qn("w:hRule"), "exact")
+
+
+def place_grid_photo(cell, path, box):
+    """Put a photo above the cell's label, cropped to exactly `box`."""
+    import copy
+
+    from docx.text.paragraph import Paragraph
+
+    if not path or not os.path.exists(path):
+        return False
+    width, height = box
+    try:
+        stream = _image_stream(path, aspect=width / height)
+    except Exception:  # noqa: BLE001 - a bad image must not lose the report
+        log.exception("Could not read photograph %s", path)
+        return False
+
+    label = cell.paragraphs[0]
+    new_p = copy.deepcopy(label._p)
+    for child in list(new_p):
+        if child.tag != qn("w:pPr"):
+            new_p.remove(child)
+    label._p.addprevious(new_p)
+
+    paragraph = Paragraph(new_p, cell)
+    fmt = paragraph.paragraph_format
+    fmt.space_before = fmt.space_after = 0
+    fmt.line_spacing = 1.0
+    fmt.right_indent = 0
+    paragraph.add_run().add_picture(stream, width=width, height=height)
+    return True
+
+
+# Headings that must always open a fresh page.
+NEW_PAGE_HEADINGS = {"INSPECTION FINDINGS", "PHOTOGRAPHIC PRESENTATION"}
+
+
+def start_on_new_page(paragraph):
+    """Begin this paragraph at the top of a new page.
+
+    Blank lines just above it are removed: on a nearly full page they would
+    spill onto a page of their own and print as an empty extra page.
+    """
+    paragraph.paragraph_format.page_break_before = True
+    node = paragraph._p.getprevious()
+    while node is not None and node.tag == qn("w:p") and _is_blank(node):
+        previous = node.getprevious()
+        node.getparent().remove(node)
+        node = previous
+
+
+def set_labelled(paragraph, value):
+    """Fill a "Label: value" line - the label keeps its bold, the value is plain.
+
+    Whatever followed the colon in the template (a placeholder such as XXX,
+    or sample wording) is replaced.
+    """
+    import copy
+
+    from docx.text.run import Run
+
+    label_run = None
+    for run in list(paragraph.runs):
+        if label_run is not None:
+            run._r.getparent().remove(run._r)
+        elif ":" in run.text:
+            run.text = run.text[: run.text.index(":") + 1]
+            label_run = run
+    if label_run is None:
+        return False
+
+    value = "" if value is None else str(value).strip()
+    if value:
+        new_r = copy.deepcopy(label_run._r)
+        label_run._r.addnext(new_r)
+        new_run = Run(new_r, paragraph)
+        new_run.text = " " + value
+        new_run.bold = False
+    return True
+
+
+def _drop_following_lines(paragraph):
+    """Remove the non-blank paragraphs directly after this one."""
+    node = paragraph._p.getnext()
+    while node is not None and node.tag == qn("w:p") and not _is_blank(node):
+        following = node.getnext()
+        node.getparent().remove(node)
+        node = following
 
 
 # ------------------------------------------------------------- table finding
@@ -145,7 +324,8 @@ def find_tables(doc):
             found["load_test"] = table
         elif len(header) == 2 and lowered == "particulars":
             found["signature"] = table
-        elif len(header) == 3 and lowered.startswith("name of client"):
+        elif len(header) in (2, 3) and lowered.startswith("name of client"):
+            # label | value, or label | : | value in older templates.
             found["particulars"] = table
         elif len(header) == 2 and lowered == "cabin":
             found["photos"] = table
@@ -282,6 +462,8 @@ TITLE_FIELDS = {
 
 def fill_title_page(doc_or_path, values, photos=None, spec=None):
     """Write the visit's details onto the approved cover page."""
+    from docx.enum.table import WD_ALIGN_VERTICAL
+
     doc = _as_doc(doc_or_path)
 
     # The template's own picture frames, captured NOW. A picture written into a
@@ -335,6 +517,12 @@ def fill_title_page(doc_or_path, values, photos=None, spec=None):
                                           values.get("prepared_by_designation")))
                 set_cell(target[1], _join(values.get("reviewed_by_name"),
                                           values.get("reviewed_by_designation")))
+                # The empty template cells carry no font of their own, so both
+                # names are set explicitly to match the rest of the cover.
+                for cell in target[:2]:
+                    set_cell_font(cell, "Arial", 10)
+                    # The template aligns the two cells differently; match them.
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
 
     frame_slots = [s for s in (spec.title_page_photos if spec else []) if not s.cell_label]
     apply_cover_photos(doc, frames, frame_slots, photo_by_slot, photos)
@@ -350,6 +538,13 @@ def _move_frames_below_header(doc):
     them directly after the header table fills that space instead.
     """
     body = doc.element.body
+
+    # A template that puts its pictures in a table has already placed them.
+    if any(
+        child.tag == qn("w:tbl") and child.find(".//" + qn("a:blip")) is not None
+        for child in body
+    ):
+        return False
 
     header = next(
         (
@@ -409,11 +604,89 @@ def apply_cover_photos(doc, frames, frame_slots, photo_by_slot, all_photos=None)
         usable = [p for p in (all_photos or []) if p.get("path") and os.path.exists(p["path"])]
         pairs = list(zip(frames, usable + [None] * len(frames)))
 
+    # Frames side by side in one table row print as a matched pair: one box
+    # for both (the smaller of the template's two), each photo cropped to fill
+    # it, centred in its cell - so they line up whatever was uploaded.
+    rows = {}
+    for frame, _ in pairs:
+        row = _ancestor(frame._inline, "w:tr")
+        if row is not None:
+            rows.setdefault(row, []).append(frame)
+    shared = {}
+    for frames_in_row in rows.values():
+        if len(frames_in_row) > 1:
+            boxes = [_frame_box(f) for f in frames_in_row]
+            box = (min(b[0] for b in boxes), min(b[1] for b in boxes))
+            for frame in frames_in_row:
+                shared[id(frame)] = box
+
     for frame, photo in pairs:
         if photo and photo.get("path") and os.path.exists(photo["path"]):
-            _swap_frame_image(doc, frame, photo["path"])
+            if id(frame) in shared:
+                _swap_frame_image(doc, frame, photo["path"], box=shared[id(frame)], fill=True)
+                _centre_in_cell(frame)
+            else:
+                # Capture the template's own extent first - it is the size the
+                # designer laid out for this picture, and it is what the
+                # uploaded photo has to fit into.
+                _swap_frame_image(doc, frame, photo["path"], box=_frame_box(frame))
         else:
             _remove_frame(frame)
+
+
+def _ancestor(node, tag):
+    while node is not None and node.tag != qn(tag):
+        node = node.getparent()
+    return node
+
+
+def _centre_in_cell(shape):
+    """Centre a picture both ways in its cell, with no stray paragraph space."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+
+    tc = _ancestor(shape._inline, "w:tc")
+    p = _ancestor(shape._inline, "w:p")
+    if tc is None or p is None:
+        return
+    tc_pr = tc.get_or_add_tcPr()
+    v_align = tc_pr.find(qn("w:vAlign"))
+    if v_align is None:
+        v_align = OxmlElement("w:vAlign")
+        tc_pr.append(v_align)
+    v_align.set(qn("w:val"), "center")
+
+    fmt = Paragraph(p, None).paragraph_format
+    fmt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fmt.space_before = fmt.space_after = 0
+    fmt.left_indent = fmt.right_indent = fmt.first_line_indent = 0
+
+
+def _frame_box(shape):
+    """The box the template drew for this picture, in EMU.
+
+    A frame sitting in a table cell is also held to that cell's width, so a
+    later template edit cannot push a photograph outside its column.
+    """
+    from docx.shared import Mm
+
+    width, height = int(shape.width), int(shape.height)
+
+    node = shape._inline
+    while node is not None and node.tag != qn("w:tc"):
+        node = node.getparent()
+    if node is not None:
+        tc_w = node.find("./" + qn("w:tcPr") + "/" + qn("w:tcW"))
+        if tc_w is not None and tc_w.get(qn("w:type")) == "dxa":
+            try:
+                # dxa is twentieths of a point; leave a little room inside.
+                cell_width = int(tc_w.get(qn("w:w"))) * 635
+                width = min(width, cell_width - Mm(3))
+            except (TypeError, ValueError):
+                pass
+
+    return width, height
 
 
 def _set_cell_image(cell, path, width_mm=18):
@@ -425,7 +698,7 @@ def _set_cell_image(cell, path, width_mm=18):
     paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
     for run in list(paragraph.runs):
         run._element.getparent().remove(run._element)
-    paragraph.add_run().add_picture(path, width=Mm(width_mm))
+    paragraph.add_run().add_picture(_image_stream(path), width=Mm(width_mm))
 
 
 # The cover photographs are sized to fit inside this box, keeping their own
@@ -434,14 +707,18 @@ COVER_MAX_W_MM = 55
 COVER_MAX_H_MM = 42
 
 
-def _swap_frame_image(doc, shape, path):
-    """Point one picture frame at a new image, upright and sized to fit."""
+def _swap_frame_image(doc, shape, path, box=None, fill=False):
+    """Point one picture frame at a new image, upright and sized to fit `box`.
+
+    With `fill`, the photo is cropped to the box's shape and fills it exactly.
+    """
     from docx.shared import Mm
 
     try:
+        aspect = (box[0] / box[1]) if fill and box and box[1] else None
         # A fresh image part carries the correct content type and extension,
         # which swapping the raw bytes of the template's part would not.
-        rid, image = doc.part.get_or_add_image(path)
+        rid, image = doc.part.get_or_add_image(_image_stream(path, aspect=aspect))
         pic = shape._inline.graphic.graphicData.pic
         pic.blipFill.blip.embed = rid
 
@@ -450,14 +727,16 @@ def _swap_frame_image(doc, shape, path):
         # rotation and any flip have to go or it prints on its side.
         _clear_rotation(pic)
 
-        # Fit inside the box rather than filling the template's frame, so a
-        # portrait photo is not blown up to half a page.
+        # Fit inside the frame the template drew, keeping the photo's own
+        # proportions, so it fills its place without being stretched.
+        max_w, max_h = box or (Mm(COVER_MAX_W_MM), Mm(COVER_MAX_H_MM))
         ratio = (image.height / image.width) if image.width else 1
-        width = Mm(COVER_MAX_W_MM)
+
+        width = max_w
         height = int(width * ratio)
-        if height > Mm(COVER_MAX_H_MM):
-            height = Mm(COVER_MAX_H_MM)
-            width = int(height / ratio) if ratio else Mm(COVER_MAX_W_MM)
+        if height > max_h:
+            height = max_h
+            width = int(height / ratio) if ratio else max_w
 
         shape.width = int(width)
         shape.height = int(height)
@@ -502,7 +781,7 @@ def _set_cell_image(cell, path, width_mm=18):
     paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
     for run in list(paragraph.runs):
         run._element.getparent().remove(run._element)
-    paragraph.add_run().add_picture(path, width=Mm(width_mm))
+    paragraph.add_run().add_picture(_image_stream(path), width=Mm(width_mm))
 
 
 def replace_cover_photos(doc, photos):
@@ -579,6 +858,8 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
             set_text(paragraph, f"Client: {client_name}")
         elif "(Client Name)" in text or "(Site Location)" in text:
             replace_in_paragraph(paragraph, {"(Client Name)": client_name, "(Site Location)": site})
+        elif stripped.upper() in NEW_PAGE_HEADINGS:
+            start_on_new_page(paragraph)
 
     tables = find_tables(doc)
 
@@ -594,13 +875,26 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
             elif label == "date":
                 set_cell(row.cells[1], inspection_date, like=row.cells[0])
 
-    # --- particulars table, positional against spec.unit_details -----------
+    # --- particulars table: label | value (or label | : | value) -----------
+    # Rows are matched by their label, so the template can reorder them.
     if "particulars" in tables:
-        for row, field in zip(tables["particulars"].rows, spec.unit_details):
-            if len(row.cells) >= 3:
-                value = details.get(field.key, {})
-                set_cell(row.cells[2], value.get("display") or value.get("value") or "",
-                         like=row.cells[0])
+        by_label = {f.label.strip().lower(): f for f in spec.unit_details}
+        fallbacks = {
+            "name_of_client": client_name,
+            "identification": identification,
+            "inspection_date": inspection_date,
+        }
+        for index, row in enumerate(tables["particulars"].rows):
+            if len(row.cells) < 2:
+                continue
+            label = _cell_text(row.cells[0]).lower().rstrip(":").strip()
+            field = by_label.get(label)
+            if field is None and index < len(spec.unit_details):
+                field = spec.unit_details[index]
+            if field is None:
+                continue
+            value = detail(field.key) or fallbacks.get(field.key, "")
+            set_cell(row.cells[-1], value, like=row.cells[0])
 
     # --- check-point tables, one per manifest section ----------------------
     unit_sections = {s["key"]: s for s in unit.get("sections") or []}
@@ -639,19 +933,34 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
                          like=row.cells[0])
 
     # --- major / minor findings, written under their headings ---------------
-    for paragraph in doc.paragraphs:
+    # The template prints these as "Label: value" lines; the bold label stays
+    # and the value follows it in plain text.
+    def entry_text(key):
+        entry = conclusion.get(key, {})
+        return entry.get("display") or entry.get("value") or ""
+
+    for paragraph in list(doc.paragraphs):
         upper = paragraph.text.strip().upper()
         if upper.startswith("MAJOR FINDINGS"):
-            entry = conclusion.get("major_findings", {})
-            set_text(paragraph, f"MAJOR FINDINGS: {entry.get('value') or ''}")
+            set_labelled(paragraph, entry_text("major_findings"))
         elif upper.startswith("MINOR FINDINGS"):
-            entry = conclusion.get("minor_findings", {})
-            set_text(paragraph, f"MINOR FINDINGS (AREA OF IMPROVEMENT): {entry.get('value') or ''}")
+            set_labelled(paragraph, entry_text("minor_findings"))
+        elif upper.startswith("NEXT EXAMINATION"):
+            set_labelled(paragraph, entry_text("next_examination_due"))
+        elif upper.startswith("CONCLUSION") and ":" in paragraph.text:
+            # The template offers every closing statement, one per line. Once
+            # a conclusion is chosen, print that one and drop the others.
+            chosen = entry_text("conclusion")
+            if chosen:
+                set_labelled(paragraph, chosen)
+                _drop_following_lines(paragraph)
 
     # --- photographic presentation, into the existing grid -----------------
     if "photos" in tables:
         by_slot = {slot["key"]: slot for slot in unit.get("photo_slots") or []}
         slots = list(spec.photo_slots)
+        box = photo_grid_box(tables["photos"])
+        lock_photo_rows(tables["photos"])
         position = 0
         for row in tables["photos"].rows:
             for cell in row.cells:
@@ -659,7 +968,7 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
                     break
                 photos = (by_slot.get(slots[position].key) or {}).get("photos") or []
                 if photos:
-                    add_image_to_cell(cell, photos[0]["path"])
+                    place_grid_photo(cell, photos[0]["path"], box)
                 position += 1
 
     return doc
@@ -674,10 +983,101 @@ def compose(parts, out_path):
         raise ValueError("Nothing to compose")
 
     composer = Composer(parts[0])
+    # Where the first appended part begins - the end of the cover page.
+    boundary = len(composer.doc.element.body) - 1
     for part in parts[1:]:
         composer.append(part)
+    if len(parts) > 1:
+        _carry_body_section(composer.doc, parts[1], boundary)
     composer.save(out_path)
     return out_path
+
+
+def _is_blank(paragraph):
+    """An empty paragraph: no text, picture, field or section break."""
+    return (
+        not "".join(paragraph.itertext()).strip()
+        and paragraph.find(".//" + qn("w:drawing")) is None
+        and paragraph.find(".//" + qn("w:pict")) is None
+        and paragraph.find(".//" + qn("w:sectPr")) is None
+    )
+
+
+def _carry_body_section(doc, source, boundary):
+    """Give the report body its own section - and so its own header.
+
+    docxcompose keeps only the first document's section properties and drops
+    the header/footer references of everything appended, so without this the
+    whole report runs under the cover's (empty) header and the SGS / LEEA
+    banner never appears. The cover is closed with its own section break and
+    the body takes the report template's page setup, header and footer.
+    """
+    import copy
+
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.opc.packuri import PackURI
+    from docx.oxml import OxmlElement
+
+    body = doc.element.body
+    cover_sect = body.find(qn("w:sectPr"))
+    source_sect = source.element.body.find(qn("w:sectPr"))
+    if cover_sect is None or source_sect is None:
+        return
+
+    # 1. Close the cover with a section break carrying its own settings.
+    #    The cover's trailing blank paragraphs go first: on a full cover they
+    #    spill onto a page of their own and print as an empty extra page.
+    children = list(body)
+    first_body = children[boundary]
+    node = first_body.getprevious()
+    while node is not None and node.tag == qn("w:p") and _is_blank(node):
+        previous = node.getprevious()
+        body.remove(node)
+        node = previous
+
+    # The break itself rides on a 1pt paragraph, too small to need a page.
+    breaker = OxmlElement("w:p")
+    p_pr = breaker.get_or_add_pPr()
+    spacing = OxmlElement("w:spacing")
+    for attr, value in (("w:before", "0"), ("w:after", "0"), ("w:line", "20"), ("w:lineRule", "exact")):
+        spacing.set(qn(attr), value)
+    p_pr.append(spacing)
+    r_pr = OxmlElement("w:rPr")
+    for tag in ("w:sz", "w:szCs"):
+        size = OxmlElement(tag)
+        size.set(qn("w:val"), "2")
+        r_pr.append(size)
+    p_pr.append(r_pr)
+    p_pr.append(copy.deepcopy(cover_sect))
+    first_body.addprevious(breaker)
+
+    # 2. The body's section: the report template's own, with its header and
+    #    footer parts (and the logos inside them) carried across.
+    body_sect = copy.deepcopy(source_sect)
+    used = {part.partname for part in doc.part.package.iter_parts()}
+
+    def unique(partname):
+        base, dot, ext = str(partname).rpartition(".")
+        n = 1
+        candidate = partname
+        while candidate in used:
+            candidate = PackURI(f"{base}_r{n}{dot}{ext}")
+            n += 1
+        used.add(candidate)
+        return candidate
+
+    for ref in body_sect:
+        if ref.tag not in (qn("w:headerReference"), qn("w:footerReference")):
+            continue
+        part = source.part.related_parts[ref.get(qn("r:id"))]
+        part.partname = unique(part.partname)
+        for rel in part.rels.values():
+            if not rel.is_external:
+                rel.target_part.partname = unique(rel.target_part.partname)
+        kind = RT.HEADER if ref.tag == qn("w:headerReference") else RT.FOOTER
+        ref.set(qn("r:id"), doc.part.relate_to(part, kind))
+
+    body.replace(cover_sect, body_sect)
 
 
 # ------------------------------------------------------------------ helpers

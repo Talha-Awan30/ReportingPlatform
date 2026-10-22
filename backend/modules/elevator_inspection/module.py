@@ -38,18 +38,14 @@ def _text(key, label, **kw):
 # ---------------------------------------------------------------------------
 TITLE_PAGE = [
     _text("report_title", "Report title",
-          default="Third Party Inspection of Passenger Elevator",
-          help_text="Printed across the top of the cover page."),
-    _text("client", "Client", help_text="Client name as it should appear on the cover."),
-    _text("client_ref", "Client Ref", required=False,
-          help_text='e.g. "Email Dated: 20th June, 2026"'),
+          default="Third Party Inspection of Passenger Elevator"),
+    _text("client", "Client"),
+    _text("client_ref", "Client Ref", required=False),
     _text("client_contact_person", "Client Contact Person", required=False),
     _text("sgs_ref_no", "SGS Ref. No."),
-    _text("inspected_by", "Inspected by",
-          help_text='Name and designation, e.g. "Sumair Ahmed (Asst. Manager)"'),
+    _text("inspected_by", "Inspected by"),
     _text("site", "Site"),
-    _text("equipment_identification", "Equipment Identification",
-          help_text='e.g. "Passenger Lift"'),
+    _text("equipment_identification", "Equipment Identification"),
     Checkpoint(key="survey_date", label="Survey Date", kind="date", options_key=""),
     _text("prepared_by_name", "Prepared by - name"),
     _text("prepared_by_designation", "Prepared by - designation"),
@@ -72,22 +68,17 @@ TITLE_PAGE_PHOTOS = [
 # ---------------------------------------------------------------------------
 UNIT_DETAILS = [
     _text("name_of_client", "Name of Client"),
-    _text("identification", "Identification",
-          help_text="The elevator's tag or ID on site."),
+    _text("identification", "Identification"),
     _text("make", "Make"),
     _text("model", "Model"),
     _text("manufacturer_serial_number", "Manufacturer Serial Number"),
-    _text("capacity", "Capacity", help_text='e.g. "1000 kg"'),
+    _text("capacity", "Capacity"),
     _text("location", "Location"),
     Checkpoint(key="inspection_date", label="Inspection Date", kind="date", options_key=""),
-    Checkpoint(key="status", label="Status", kind="dropdown", options_key=CONCLUSION,
-               help_text="Satisfactory or Unsatisfactory."),
+    Checkpoint(key="status", label="Status", kind="dropdown", options_key=CONCLUSION),
     _text("type", "Type", required=False),
-    Checkpoint(key="levels", label="Levels", kind="number", options_key="",
-               help_text="Number of levels served."),
-    _text("reference_code", "Reference Code For Inspection",
-          default="ASME A-17.1 / A-17.2 / EN-81",
-          help_text="Safety Code For Elevators and Escalators."),
+    Checkpoint(key="levels", label="Levels", kind="number", options_key=""),
+    _text("reference_code", "Reference Code For Inspection"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -113,13 +104,10 @@ CONCLUSION_FIELDS = [
     Checkpoint(key="minor_findings", label="MINOR FINDINGS (Area of Improvement)",
                kind="textarea", options_key="", required=False),
     Checkpoint(key="next_examination_due", label="Next Examination Due on", kind="date",
-               options_key="",
-               help_text="Six months after a satisfactory inspection; not applicable if unsatisfactory."),
+               options_key=""),
     Checkpoint(key="conclusion", label="Conclusion", kind="dropdown", options_key=CONCLUSION,
-               use_report_text=True,
-               help_text="The closing statement printed in full on the report."),
-    _text("inspector_signature_name", "Inspected by - name on the signature block",
-          required=False),
+               use_report_text=True),
+    _text("inspector_signature_name", "Inspected by", required=False),
 ]
 
 
