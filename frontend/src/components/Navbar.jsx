@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { ROLES, useAuth } from '../auth/AuthContext'
+import { clientApprovalApi } from '../api/endpoints'
+import { APPROVALS_CHANGED } from '../hooks/useClientDirectory'
 
 /**
  * The theme kit navbar, wired to the router. Menu entries are filtered by role
@@ -13,6 +15,9 @@ export default function Navbar() {
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setOpen(false), [location.pathname])
+
+  const isAdmin = user?.role === ROLES.ADMIN
+  const pendingClients = usePendingClientCount(isAdmin)
 
   const staffLinks = [
     { to: '/', label: 'Dashboard', icon: 'fa-gauge-high', end: true },
@@ -30,6 +35,7 @@ export default function Navbar() {
     { to: '/admin/users', label: 'Users & Roles', icon: 'fa-users' },
     { to: '/admin/master-lists', label: 'Master Lists', icon: 'fa-list-check' },
     { to: '/admin/equipment-types', label: 'Equipment Types', icon: 'fa-tags' },
+    { to: '/admin/client-approvals', label: 'Client Approvals', icon: 'fa-user-check', badge: pendingClients },
   ]
 
   return (
@@ -113,13 +119,16 @@ export default function Navbar() {
               {hasRole(ROLES.ADMIN) && (
                 <li className="nav-dropdown">
                   <span className="nav-link dropdown-toggle" role="button" tabIndex={0}>
-                    <i className="fas fa-cog" /> Admin <i className="fas fa-caret-down" />
+                    <i className="fas fa-cog" /> Admin
+                    {pendingClients > 0 && <span className="nav-badge">{pendingClients}</span>}{' '}
+                    <i className="fas fa-caret-down" />
                   </span>
                   <ul className="dropdown-menu">
                     {adminLinks.map((link) => (
                       <li key={link.to}>
                         <Link to={link.to}>
                           <i className={`fas ${link.icon}`} /> {link.label}
+                          {link.badge > 0 && <span className="nav-badge">{link.badge}</span>}
                         </Link>
                       </li>
                     ))}
@@ -150,4 +159,27 @@ export default function Navbar() {
       </div>
     </nav>
   )
+}
+
+/** Open new-client requests, for the admin badge. Refreshes every minute. */
+function usePendingClientCount(enabled) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!enabled) return undefined
+    let alive = true
+    const load = () =>
+      clientApprovalApi
+        .count()
+        .then(({ count: n }) => alive && setCount(n))
+        .catch(() => {})
+    load()
+    const timer = setInterval(load, 60_000)
+    window.addEventListener(APPROVALS_CHANGED, load)
+    return () => {
+      alive = false
+      clearInterval(timer)
+      window.removeEventListener(APPROVALS_CHANGED, load)
+    }
+  }, [enabled])
+  return enabled ? count : 0
 }

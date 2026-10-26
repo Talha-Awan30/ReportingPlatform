@@ -21,6 +21,7 @@ CORE_BLUEPRINTS = [
     ("core.auth", "/api/auth"),
     ("core.dashboard", "/api/dashboard"),
     ("core.clients", "/api/clients"),
+    ("core.client_approvals", "/api/client-approvals"),
     ("core.jobs", "/api/jobs"),
     ("core.equipment", "/api/equipment"),
     ("core.reports", "/api/reports"),
@@ -39,6 +40,7 @@ def create_app(config_name=None):
     _configure_logging(app)
     _ensure_directories(app)
     _init_extensions(app)
+    _upgrade_schema(app)
     _register_blueprints(app)
     _register_jwt_handlers(app)
     _register_cli(app)
@@ -82,6 +84,15 @@ def _init_extensions(app):
     )
 
 
+def _upgrade_schema(app):
+    """Add tables and columns introduced since the database was created."""
+    import models  # noqa: F401 - registers every model with the metadata
+    from services.schema_upgrade import ensure_schema
+
+    with app.app_context():
+        ensure_schema()
+
+
 def _register_blueprints(app):
     import importlib
 
@@ -118,6 +129,25 @@ def _register_cli(app):
         from seed import run_seed
 
         run_seed()
+
+    @app.cli.command("import-clients")
+    @click.argument("path", required=False)
+    @click.option(
+        "--deactivate-others",
+        is_flag=True,
+        help="Mark clients that are not on the list (and have no CL- code) inactive.",
+    )
+    def import_clients_command(path, deactivate_others):
+        """Load the SGS approved-client list (data/clients.json by default)."""
+        from services.client_import import DEFAULT_PATH, import_clients
+
+        result = import_clients(path or DEFAULT_PATH, deactivate_others=deactivate_others)
+        # ASCII only: the Windows console cannot print arrows or dashes.
+        click.echo(
+            f"Read {result['read']} rows -> imported {result['imported']}, "
+            f"skipped {result['skipped']} (already present), "
+            f"deactivated {result['deactivated']}"
+        )
 
     @app.cli.command("scan-expiry")
     @click.option("--dry-run", is_flag=True, help="Report what would be sent without sending it.")

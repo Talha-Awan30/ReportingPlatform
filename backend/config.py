@@ -43,6 +43,9 @@ class Config:
 
     # --- Generated reports ----------------------------------------------
     GENERATED_FOLDER = os.path.join(BASE_DIR, "generated")
+    # Reviewer previews: auto | libreoffice | word | off (see services/pdf_converter.py).
+    PDF_CONVERTER = os.getenv("PDF_CONVERTER", "auto")
+    SOFFICE_PATH = os.getenv("SOFFICE_PATH", "")
 
     # --- Mail -----------------------------------------------------------
     MAIL_ENABLED = _bool("MAIL_ENABLED", False)

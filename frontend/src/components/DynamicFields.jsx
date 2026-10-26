@@ -7,7 +7,15 @@ import { Field, Pill } from './ui'
  * and their answers are stored as `{ value, remarks }`, so the same component
  * serves the title page, the particulars table and the conclusion block.
  */
-export function DynamicField({ field, value = {}, options = [], editable = true, error, onChange }) {
+export function DynamicField({
+  field,
+  value = {},
+  options = [],
+  editable = true,
+  showRequired = true,
+  error,
+  onChange,
+}) {
   const set = (patch) => onChange?.(field.key, patch)
   const current = value.value ?? field.default ?? ''
 
@@ -72,7 +80,7 @@ export function DynamicField({ field, value = {}, options = [], editable = true,
   return (
     <Field
       label={field.label}
-      required={field.required}
+      required={field.required && showRequired}
       hint={field.help_text}
       error={error}
       span={field.kind === 'textarea'}
@@ -88,6 +96,7 @@ export function DynamicFieldGrid({
   values = {},
   options = {},
   editable = true,
+  showRequired = true,
   missingKeys,
   onChange,
 }) {
@@ -101,6 +110,7 @@ export function DynamicFieldGrid({
           value={values[field.key] || {}}
           options={options[field.options_key]?.options || []}
           editable={editable}
+          showRequired={showRequired}
           error={missingKeys?.has(field.key) ? 'Required' : undefined}
           onChange={onChange}
         />

@@ -4,7 +4,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { moduleApi, reportApi } from '../api/endpoints'
 import { useApi, useDebounced } from '../hooks/useApi'
 import { useAuth } from '../auth/AuthContext'
+import MoreMenu from '../components/MoreMenu'
 import PageHeader from '../components/PageHeader'
+import ReportHistoryDialog from '../components/ReportHistoryDialog'
 import Spinner from '../components/Spinner'
 import { Empty, Pager, StatusPill, formatDate } from '../components/ui'
 
@@ -23,6 +25,8 @@ export default function Reports() {
 
   const [search, setSearch] = useState(params.get('search') || '')
   const [page, setPage] = useState(1)
+  // The ⋮ menu's pop-up: approval trail or revision changes of one row.
+  const [history, setHistory] = useState(null)
   const debouncedSearch = useDebounced(search)
 
   const status = params.get('status') || ''
@@ -37,6 +41,8 @@ export default function Reports() {
         search: debouncedSearch || undefined,
         status: status || undefined,
         module_slug: moduleSlug || undefined,
+        // A multi-unit visit is one row; its units are switched on the report page.
+        group_visits: 1,
       }),
     [page, debouncedSearch, status, moduleSlug],
   )
@@ -129,35 +135,65 @@ export default function Reports() {
                   <tr>
                     <th>Report</th>
                     <th>Item</th>
-                    <th>Equipment</th>
                     <th>Client / Job</th>
                     <th>Inspected</th>
                     <th>Status</th>
                     <th className="text-right">Expires</th>
+                    {!isClient && <th aria-label="Actions" />}
                   </tr>
                 </thead>
                 <tbody>
-                  {reports.data.items.map((report) => (
-                    <tr key={report.id}>
-                      <td>
-                        <Link to={`/reports/${report.id}`} className="cell-strong">
-                          {report.report_number}
-                        </Link>
-                        <div className="cell-sub">Rev {report.revision}</div>
-                      </td>
-                      <td className="cell-sub">{report.equipment_type}</td>
-                      <td>{report.equipment_tag}</td>
-                      <td>
-                        <div>{report.client_name}</div>
-                        <div className="cell-sub">{report.job_number}</div>
-                      </td>
-                      <td className="nowrap">{formatDate(report.inspection_date)}</td>
-                      <td>
-                        <StatusPill label={report.status_label} severity={report.status_severity} />
-                      </td>
-                      <td className="text-right nowrap">{formatDate(report.certificate_expiry_date)}</td>
-                    </tr>
-                  ))}
+                  {reports.data.items.map((report) => {
+                    const visit = report.visit
+                    return (
+                      <tr key={report.id}>
+                        <td>
+                          <Link to={`/reports/${report.id}`} className="cell-strong">
+                            {visit ? visit.set_number : report.report_number}
+                          </Link>
+                          <div className="cell-sub">
+                            {visit &&
+                              `${visit.unit_count} ${visit.unit_count === 1 ? visit.unit_noun : visit.unit_noun_plural} · `}
+                            Rev {visit ? visit.revision : report.revision}
+                          </div>
+                        </td>
+                        <td className="cell-sub">{report.equipment_type}</td>
+                        <td>
+                          <div>{report.client_name}</div>
+                          <div className="cell-sub">{report.job_number}</div>
+                        </td>
+                        <td className="nowrap">{formatDate(report.inspection_date)}</td>
+                        <td>
+                          <StatusPill
+                            label={visit ? visit.status_label : report.status_label}
+                            severity={visit ? visit.status_severity : report.status_severity}
+                          />
+                        </td>
+                        <td className="text-right nowrap">
+                          {formatDate(visit ? visit.expires : report.certificate_expiry_date)}
+                        </td>
+                        {!isClient && (
+                          <td className="text-right row-menu">
+                            <MoreMenu
+                              items={['trail', 'revisions'].map((mode) => ({
+                                icon: mode === 'trail' ? 'fa-clock-rotate-left' : 'fa-code-branch',
+                                label: mode === 'trail' ? 'Approval trail' : 'Revision changes',
+                                onClick: () =>
+                                  setHistory({
+                                    mode,
+                                    title: `${mode === 'trail' ? 'Approval trail' : 'Revision changes'} · ${
+                                      visit ? visit.set_number : report.report_number
+                                    }`,
+                                    units: visit ? visit.units : [{ id: report.id, sequence: 1 }],
+                                    unitNoun: visit?.unit_noun,
+                                  }),
+                              }))}
+                            />
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -169,6 +205,7 @@ export default function Reports() {
           </Empty>
         )}
       </div>
+      <ReportHistoryDialog target={history} onClose={() => setHistory(null)} />
     </>
   )
 }

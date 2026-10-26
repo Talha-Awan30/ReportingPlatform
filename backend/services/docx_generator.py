@@ -16,6 +16,7 @@ import os
 from datetime import datetime
 
 from models import PhotoKind
+from services.image_compress import compressed_stream
 from services.storage import generated_dir, photo_path, set_photo_path
 
 log = logging.getLogger(__name__)
@@ -227,12 +228,17 @@ def _title_page_of(report):
     return _flatten(record.title_page) if record else {}
 
 
-def generate_set(record, spec):
-    """Render a whole visit: the title page once, then every unit in sequence."""
+def generate_set(record, spec, revision=None):
+    """Render a whole visit: the title page once, then every unit in sequence.
+
+    With `revision` the file is named for it, so each revision keeps its own
+    document for the revision history.
+    """
     from modules.blueprint_factory import resolve_options
 
     options = resolve_options(spec) if spec else {}
-    out_name = f"{record.set_number or f'set-{record.id}'}.docx"
+    suffix = f"-rev{revision}" if revision is not None else ""
+    out_name = f"{record.set_number or f'set-{record.id}'}{suffix}.docx"
     out_path = os.path.join(generated_dir(), out_name)
 
     source = template_path(spec)
@@ -307,7 +313,7 @@ def _render_set_template(source, out_path, record, spec, options):
 
     for item in context["title_page_photos"]:
         if item["path"] and os.path.exists(item["path"]):
-            item["image"] = InlineImage(doc, item["path"], width=Mm(120))
+            item["image"] = InlineImage(doc, compressed_stream(item["path"]), width=Mm(120))
     for unit in context["units"]:
         _bind_images(doc, unit, InlineImage, Mm)
 
@@ -320,11 +326,11 @@ def _bind_images(doc, context, InlineImage, Mm):
     for key in ("front_page_photos", "inspection_photos"):
         for item in context.get(key, []):
             if item["path"] and os.path.exists(item["path"]):
-                item["image"] = InlineImage(doc, item["path"], width=Mm(80))
+                item["image"] = InlineImage(doc, compressed_stream(item["path"]), width=Mm(80))
     for slot in context.get("photo_slots", []):
         for item in slot["photos"]:
             if item["path"] and os.path.exists(item["path"]):
-                item["image"] = InlineImage(doc, item["path"], width=Mm(75))
+                item["image"] = InlineImage(doc, compressed_stream(item["path"]), width=Mm(75))
 
 
 # ============================================================================
@@ -368,7 +374,7 @@ def _render_set_fallback(out_path, record, spec, options):
 
     for item in context["title_page_photos"]:
         if item["path"] and os.path.exists(item["path"]):
-            doc.add_picture(item["path"], width=Mm(140))
+            doc.add_picture(compressed_stream(item["path"]), width=Mm(140))
             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     doc.add_paragraph()
@@ -492,7 +498,7 @@ def _write_unit(doc, unit, spec, index, total, sgs_blue):
                 cell = image_row[column]
                 path = slot["photos"][0]["path"] if slot["photos"] else None
                 if path and os.path.exists(path):
-                    cell.paragraphs[0].add_run().add_picture(path, width=Mm(75))
+                    cell.paragraphs[0].add_run().add_picture(compressed_stream(path), width=Mm(75))
                 else:
                     cell.text = "-"
     elif unit.get("inspection_photos"):
@@ -500,7 +506,7 @@ def _write_unit(doc, unit, spec, index, total, sgs_blue):
         doc.add_paragraph("Photographic Presentation").runs[0].bold = True
         for item in unit["inspection_photos"]:
             if item["path"] and os.path.exists(item["path"]):
-                doc.add_picture(item["path"], width=Mm(120))
+                doc.add_picture(compressed_stream(item["path"]), width=Mm(120))
                 if item["caption"]:
                     doc.add_paragraph(item["caption"]).runs[0].font.size = Pt(9)
 

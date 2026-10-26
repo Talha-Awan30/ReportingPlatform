@@ -24,6 +24,7 @@ import Profile from './pages/Profile'
 import Users from './pages/admin/Users'
 import MasterLists from './pages/admin/MasterLists'
 import EquipmentTypes from './pages/admin/EquipmentTypes'
+import ClientApprovals from './pages/admin/ClientApprovals'
 import ClientPortal from './pages/portal/ClientPortal'
 import PortalReports from './pages/portal/PortalReports'
 import PortalEquipment from './pages/portal/PortalEquipment'
@@ -83,6 +84,10 @@ export default function App() {
         <Route
           path="admin/equipment-types"
           element={<ProtectedRoute roles={[ROLES.ADMIN]}><EquipmentTypes /></ProtectedRoute>}
+        />
+        <Route
+          path="admin/client-approvals"
+          element={<ProtectedRoute roles={[ROLES.ADMIN]}><ClientApprovals /></ProtectedRoute>}
         />
 
         {/* --------------------------------------------------- client portal */}

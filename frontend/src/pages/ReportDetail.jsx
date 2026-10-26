@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { downloadFile, moduleApi, reportApi } from '../api/endpoints'
+import { downloadFile, inspectionSetApi, moduleApi, reportApi } from '../api/endpoints'
 import { errorDetails, errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import { DynamicFieldGrid } from '../components/DynamicFields'
+import AuthedImage from '../components/AuthedImage'
+import { openPdfInNewTab } from '../api/openPdf'
 import { ROLES, useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
@@ -43,6 +45,7 @@ export default function ReportDetail() {
   const [saving, setSaving] = useState(false)
   const [missing, setMissing] = useState([])
   const [dialog, setDialog] = useState(null) // 'return' | 'query' | 'approve'
+  const [prefilledCount, setPrefilledCount] = useState(0)
 
   // Seed the form once the report arrives, and again after any reload.
   const loadedRevision = useRef(null)
@@ -53,21 +56,79 @@ export default function ReportDetail() {
     if (loadedRevision.current === stamp) return
     loadedRevision.current = stamp
 
-    setAnswers(data.data || {})
+    // Merge in anything already typed on an earlier lift of the same visit,
+    // without ever overwriting what this lift already has.
+    const prefill = data.prefill || {}
+    const merged = { ...data.data }
+    let carried = 0
+    Object.entries(prefill).forEach(([key, entry]) => {
+      if (!merged[key]?.value) {
+        merged[key] = entry
+        carried += 1
+      }
+    })
+    setAnswers(merged)
+    setPrefilledCount(carried)
     setComments(data.comments || '')
     setOverallResult(data.overall_result || '')
     setInspectionDate(toDateInput(data.inspection_date))
-    setDirty(false)
+    setDirty(carried > 0)
   }, [report.data])
+
+  // Every section starts shut - 81 questions at once is unreadable. Keyed on
+  // the report id too, so moving to the next unit shuts them all again instead
+  // of inheriting whatever was open on the previous one.
+  const [collapsed, setCollapsed] = useState(() => new Set())
+  useEffect(() => {
+    const sections = schema.data?.module?.sections
+    if (!sections) return
+    setCollapsed(new Set(sections.map((s) => s.key)))
+  }, [schema.data, id])
 
   const setAnswer = useCallback((key, patch) => {
     setAnswers((current) => ({ ...current, [key]: { ...(current[key] || {}), ...patch } }))
     setDirty(true)
   }, [])
 
+  const toggleSection = useCallback((key) => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  /** Set every dropdown in one section to the same option in a single click. */
+  const bulkFill = useCallback((section, value) => {
+    setAnswers((current) => {
+      const next = { ...current }
+      section.checkpoints
+        .filter((cp) => cp.kind === 'dropdown')
+        .forEach((cp) => {
+          next[cp.key] = { ...(next[cp.key] || {}), value }
+        })
+      return next
+    })
+    setDirty(true)
+  }, [])
+
   const data = report.data?.report
   const module = schema.data?.module
+  // Modules with a particulars table already capture the client, location,
+  // inspection date and status there - the generic details card would repeat them.
+  const hasParticulars = module?.unit_details?.length > 0
   const options = schema.data?.options || {}
+
+  // Revision control: null shows the live report; a number shows that past
+  // revision read-only, exactly as it was submitted.
+  const [viewRev, setViewRev] = useState(null)
+  useEffect(() => setViewRev(null), [id])
+  const revisionList = useApi(
+    () => (isClient ? null : reportApi.revisions(id)),
+    [id, report.data?.report?.revision, report.data?.report?.status],
+  )
+  const snapshot = useApi(() => (viewRev == null ? null : reportApi.revision(id, viewRev)), [id, viewRev])
 
   const canEdit = useMemo(() => {
     if (!data) return false
@@ -83,8 +144,9 @@ export default function ReportDetail() {
       const result = await reportApi.update(id, {
         data: answers,
         comments,
-        overall_result: overallResult || null,
-        inspection_date: inspectionDate || null,
+        // With a particulars table, the report's own date and result follow it.
+        overall_result: (hasParticulars ? answers.status?.value : overallResult) || null,
+        inspection_date: (hasParticulars ? answers.inspection_date?.value : inspectionDate) || null,
       })
       report.setData({ ...report.data, report: { ...report.data.report, ...result.report } })
       setDirty(false)
@@ -102,12 +164,16 @@ export default function ReportDetail() {
     if (dirty && !(await save({ silent: true }))) return
     setMissing([])
     try {
-      const result = await reportApi.submit(id)
+      // A unit of a visit submits the whole visit - every lift in one go.
+      const result = data.inspection_set_id
+        ? await inspectionSetApi.submit(data.inspection_set_id)
+        : await reportApi.submit(id)
       toast.success(result.message)
       report.reload()
     } catch (err) {
       const details = errorDetails(err)
-      setMissing(details.missing || [])
+      const mine = (details.units || []).find((u) => u.id === data.id)
+      setMissing(mine ? mine.missing : details.missing || [])
       toast.error(errorMessage(err))
     }
   }
@@ -131,6 +197,21 @@ export default function ReportDetail() {
     }
   }
 
+  /** The whole visit: title page once, then every lift. */
+  const downloadCombined = async () => {
+    const setId = data.inspection_set_id
+    try {
+      // Build it first, so a lift edited since the last generate is included.
+      const result = await inspectionSetApi.generate(setId, true)
+      await downloadFile(
+        inspectionSetApi.downloadUrl(setId),
+        result.set?.docx_path || `${data.set_number}.docx`,
+      )
+    } catch (err) {
+      toast.error(errorMessage(err, 'The combined report could not be built.'))
+    }
+  }
+
   const remove = async () => {
     if (!window.confirm('Delete this draft? This cannot be undone.')) return
     try {
@@ -146,10 +227,42 @@ export default function ReportDetail() {
   if (report.error) return <Empty icon="fa-triangle-exclamation" title="Could not load this report">{report.error}</Empty>
 
   const missingKeys = new Set(missing.map((m) => m.key))
+  const enforceRequired = schema.data?.enforce_required ?? true
   const filledSlots = new Set(
     (data.photos || []).filter((p) => p.checkpoint_key).map((p) => p.checkpoint_key),
   )
   const slotsFilled = (module?.photo_slots || []).filter((s) => filledSlots.has(s.key)).length
+
+  const units = data.set_units || []
+
+  // A past revision is shown read-only, with the answers it was submitted with.
+  const revisionRows = revisionList.data?.revisions || []
+  const viewingPast = viewRev != null
+  const past = viewingPast ? snapshot.data : null
+  const shownAnswers = viewingPast ? past?.data || {} : answers
+  const editable = canEdit && !viewingPast
+  const shownPhotos = viewingPast
+    ? (data.photos || []).filter((p) => (past?.photo_ids || []).includes(p.id))
+    : data.photos || []
+  // The live report is a revision of its own once submitted; while it is
+  // being corrected after a return it becomes the next one.
+  const liveLabel = !revisionRows.length
+    ? `Rev ${data.revision} (draft)`
+    : data.is_editable && data.status === 'returned'
+      ? `Rev ${data.revision + 1} (being corrected)`
+      : `Rev ${data.revision} (current)`
+  const pastRows = revisionRows.filter(
+    (r) => !(r.revision === data.revision && !(data.is_editable && data.status === 'returned')),
+  )
+  const fileRev = viewingPast ? viewRev : revisionRows.find((r) => r.revision === data.revision)?.revision
+  const fileRow = revisionRows.find((r) => r.revision === fileRev)
+  const viewRevisionPdf = () =>
+    openPdfInNewTab('revision', data.id, { revision: fileRev }).catch((err) => toast.error(errorMessage(err)))
+  const downloadRevision = (format) =>
+    downloadFile(reportApi.revisionFileUrl(data.id, fileRev, format), `rev${fileRev}.${format}`).catch((err) =>
+      toast.error(errorMessage(err)),
+    )
+  const unitNoun = module?.unit_noun || 'unit' 
 
   return (
     <>
@@ -166,24 +279,8 @@ export default function ReportDetail() {
         crumbs={[{ label: 'Reports', to: '/reports' }, { label: data.report_number }]}
         actions={
           <>
-            {data.docx_path && (
-              <button type="button" className="btn btn-outline" onClick={download}>
-                <i className="fas fa-file-word" /> Download Word
-              </button>
-            )}
-
-            {canEdit && (
-              <>
-                <button type="button" className="btn btn-primary" onClick={() => save()} disabled={saving || !dirty}>
-                  <i className="fas fa-floppy-disk" /> {saving ? 'Saving…' : 'Save draft'}
-                </button>
-                <button type="button" className="btn btn-cta" onClick={submit} disabled={saving}>
-                  <i className="fas fa-paper-plane" /> Submit for review
-                </button>
-              </>
-            )}
-
-            {hasRole(ROLES.REVIEWER) && data.status === 'submitted' && (
+            {/* Decisions act on the current report, so not while an old one is open. */}
+            {hasRole(ROLES.REVIEWER) && data.status === 'submitted' && !viewingPast && (
               <>
                 <button type="button" className="btn btn-outline" onClick={() => setDialog('return')}>
                   <i className="fas fa-rotate-left" /> Return
@@ -209,16 +306,90 @@ export default function ReportDetail() {
               </>
             )}
 
-            {data.status === 'draft' && !isClient && (
-              <button type="button" className="btn btn-danger" onClick={remove}>
-                <i className="fas fa-trash" /> Delete
-              </button>
-            )}
           </>
         }
       />
 
-      {data.status === 'returned' && data.return_reason && (
+      {/* Every unit of the visit, so any lift is one click away. */}
+      {units.length > 1 && (
+        <nav className="unit-switcher" aria-label={`${module?.unit_noun_plural || 'Units'} on this visit`}>
+          {units.map((u) => (
+            <Link
+              key={u.id}
+              to={`/reports/${u.id}`}
+              className={`unit-tab${u.id === data.id ? ' active' : ''}`}
+              aria-current={u.id === data.id ? 'page' : undefined}
+            >
+              <strong>
+                {unitNoun.charAt(0).toUpperCase() + unitNoun.slice(1)} #{u.sequence}
+              </strong>
+              <small>{u.identification || u.report_number}</small>
+            </Link>
+          ))}
+        </nav>
+      )}
+
+      {/* Revision control: pick a revision to see it exactly as submitted. */}
+      {!isClient && revisionRows.length > 0 && (
+        <div className="revision-bar">
+          <label className="revision-select">
+            <span>Revision</span>
+            <select
+              value={viewRev == null ? '' : String(viewRev)}
+              onChange={(e) => setViewRev(e.target.value === '' ? null : Number(e.target.value))}
+            >
+              <option value="">{liveLabel}</option>
+              {pastRows.map((r) => (
+                <option key={r.revision} value={r.revision}>
+                  Rev {r.revision} · {r.outcome === 'returned' ? 'Returned' : r.outcome === 'approved' ? 'Approved' : 'Awaiting review'}
+                  {r.submitted_at ? ` · ${formatDateTime(r.submitted_at)}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {fileRow && (
+            <div className="revision-files">
+              {fileRow.has_pdf && (
+                <>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={viewRevisionPdf}>
+                    <i className="fas fa-up-right-from-square" /> View
+                  </button>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => downloadRevision('pdf')}>
+                    <i className="fas fa-file-pdf" /> Download PDF
+                  </button>
+                </>
+              )}
+              {fileRow.has_docx && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => downloadRevision('docx')}>
+                  <i className="fas fa-file-word" /> Download Word
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewingPast && (
+        <div className={`alert ${past?.outcome === 'returned' ? 'alert-danger' : 'alert-info'}`} style={{ marginBottom: '1.5rem' }}>
+          <i className="fas fa-clock-rotate-left" />
+          <span style={{ flex: 1 }}>
+            <strong>Viewing Rev {viewRev}</strong>
+            {past?.submitted_at && `, submitted ${formatDateTime(past.submitted_at)}`}
+            {past?.submitted_by && ` by ${past.submitted_by}`} - read only.
+            {past?.review_comment && (
+              <>
+                {' '}
+                <strong>{past.outcome === 'returned' ? 'Returned' : 'Reviewer'}:</strong> {past.review_comment}
+              </>
+            )}{' '}
+            <button type="button" className="link-button" onClick={() => setViewRev(null)}>
+              Back to the current report
+            </button>
+          </span>
+        </div>
+      )}
+
+      {!viewingPast && data.status === 'returned' && data.return_reason && (
         <div className="alert alert-danger" style={{ marginBottom: '1.5rem' }}>
           <i className="fas fa-rotate-left" />
           <span>
@@ -247,6 +418,7 @@ export default function ReportDetail() {
       )}
 
       {/* ------------------------------------------------------------ header */}
+      {!hasParticulars && (
       <div className="section-card">
         <div className="card-head">
           <div>
@@ -273,7 +445,7 @@ export default function ReportDetail() {
           <Detail k="Certificate expires" v={formatDate(data.certificate_expiry_date)} />
         </div>
 
-        {canEdit && (
+        {editable && (
           <div className="field-grid" style={{ marginTop: '1.5rem' }}>
             <div className="field">
               <label>Inspection date</label>
@@ -310,9 +482,10 @@ export default function ReportDetail() {
           </div>
         )}
       </div>
+      )}
 
       {/* ------------------------------------------------- particulars table */}
-      {module?.unit_details?.length > 0 && (
+      {hasParticulars && (
         <div className="section-card">
           <div className="card-head">
             <div>
@@ -321,17 +494,34 @@ export default function ReportDetail() {
                 The detail table printed at the head of this {module.unit_noun}&apos;s report.
               </p>
             </div>
-            {data.set_number && (
-              <Link to={`/inspection-sets/${data.inspection_set_id}`} className="btn btn-outline btn-sm">
-                <i className="fas fa-layer-group" /> {data.set_number} · {module.unit_noun} #{data.sequence}
-              </Link>
-            )}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <StatusPill label={data.status_label} severity={data.status_severity} />
+              <Pill tone="neutral">Revision {data.revision}</Pill>
+              {data.set_number && (
+                <Link to={`/inspection-sets/${data.inspection_set_id}`} className="btn btn-outline btn-sm">
+                  <i className="fas fa-layer-group" /> {data.set_number} · {module.unit_noun} #{data.sequence}
+                </Link>
+              )}
+            </div>
           </div>
+
+          {prefilledCount > 0 && editable && (
+            <div className="alert alert-info" style={{ marginBottom: '1.25rem' }}>
+              <i className="fas fa-wand-magic-sparkles" />
+              <span>
+                <strong>{prefilledCount} field(s) carried over</strong> from the earlier{' '}
+                {module.unit_noun_plural} on this visit. Check them, then fill in this{' '}
+                {module.unit_noun}&apos;s own Identification and Serial Number.
+              </span>
+            </div>
+          )}
+
           <DynamicFieldGrid
             fields={module.unit_details}
-            values={answers}
+            values={shownAnswers}
             options={options}
-            editable={canEdit}
+            editable={editable}
+            showRequired={enforceRequired}
             missingKeys={missingKeys}
             onChange={(key, patch) => setAnswer(key, patch)}
           />
@@ -342,41 +532,20 @@ export default function ReportDetail() {
       {schema.loading ? (
         <Spinner label="Loading the inspection form" />
       ) : module && module.sections.length ? (
-        module.sections.map((section) => (
-          <div className="section-card" key={section.key}>
-            <div className="card-head">
-              <div>
-                <h2>{section.title}</h2>
-                {section.description && <p className="card-sub">{section.description}</p>}
-              </div>
-              <Pill tone="neutral">{section.checkpoints.length} checks</Pill>
-            </div>
-
-            <div className="table-container">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '42%' }}>Check point</th>
-                    <th style={{ width: '25%' }}>Result</th>
-                    <th>Remarks / Recommendations</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {section.checkpoints.map((cp) => (
-                    <CheckpointRow
-                      key={cp.key}
-                      checkpoint={cp}
-                      value={answers[cp.key] || {}}
-                      options={options[cp.options_key]?.options || []}
-                      editable={canEdit}
-                      flagged={missingKeys.has(cp.key)}
-                      onChange={(patch) => setAnswer(cp.key, patch)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        module.sections.map((section, index) => (
+          <ChecklistSection
+            key={section.key}
+            index={index + 1}
+            section={section}
+            answers={shownAnswers}
+            options={options}
+            editable={editable}
+            missingKeys={missingKeys}
+            collapsed={collapsed.has(section.key)}
+            onToggle={() => toggleSection(section.key)}
+            onChange={setAnswer}
+            onBulkFill={bulkFill}
+          />
         ))
       ) : (
         <div className="section-card">
@@ -398,9 +567,10 @@ export default function ReportDetail() {
           </div>
           <DynamicFieldGrid
             fields={module.conclusion}
-            values={answers}
+            values={shownAnswers}
             options={options}
-            editable={canEdit}
+            editable={editable}
+            showRequired={enforceRequired}
             missingKeys={missingKeys}
             onChange={(key, patch) => setAnswer(key, patch)}
           />
@@ -408,6 +578,9 @@ export default function ReportDetail() {
       )}
 
       {/* ---------------------------------------------------------- comments */}
+      {/* The SGS report (modules with a particulars table) has nowhere to print
+          free text, so it is only asked for where the report carries it. */}
+      {!hasParticulars && (
       <div className="section-card">
         <div className="card-head">
           <div>
@@ -415,7 +588,7 @@ export default function ReportDetail() {
             <p className="card-sub">Free text that carries straight into the Word report.</p>
           </div>
         </div>
-        {canEdit ? (
+        {editable ? (
           <TextArea
             value={comments}
             onChange={(e) => {
@@ -429,6 +602,7 @@ export default function ReportDetail() {
           <p style={{ whiteSpace: 'pre-wrap' }}>{comments || <span className="muted">No comments recorded.</span>}</p>
         )}
       </div>
+      )}
 
       {/* ------------------------------------------------------------ photos */}
       {module?.photo_slots?.length > 0 ? (
@@ -450,11 +624,11 @@ export default function ReportDetail() {
                 key={slot.key}
                 reportId={id}
                 slot={slot}
-                photos={(data.photos || []).filter(
+                photos={shownPhotos.filter(
                   (p) => p.kind === 'inspection' && p.checkpoint_key === slot.key,
                 )}
-                editable={canEdit}
-                onChanged={report.reload}
+                editable={editable}
+                onChanged={() => report.reload({ silent: true })}
               />
             ))}
           </div>
@@ -467,9 +641,9 @@ export default function ReportDetail() {
             subtitle="Used only on the report cover — kept separate on purpose."
             icon="fa-image"
             kind="front_page"
-            photos={(data.photos || []).filter((p) => p.kind === 'front_page')}
-            editable={canEdit}
-            onChanged={report.reload}
+            photos={shownPhotos.filter((p) => p.kind === 'front_page')}
+            editable={editable}
+            onChanged={() => report.reload({ silent: true })}
           />
 
           <PhotoSection
@@ -478,39 +652,45 @@ export default function ReportDetail() {
             subtitle="Evidence for the body of the report."
             icon="fa-images"
             kind="inspection"
-            photos={(data.photos || []).filter((p) => p.kind === 'inspection')}
-            editable={canEdit}
-            onChanged={report.reload}
+            photos={shownPhotos.filter((p) => p.kind === 'inspection')}
+            editable={editable}
+            onChanged={() => report.reload({ silent: true })}
           />
         </>
       )}
 
-      {/* ------------------------------------------------------------- trail */}
-      <div className="section-card">
-        <div className="card-head">
-          <div>
-            <h2><i className="fas fa-clock-rotate-left" /> Approval trail</h2>
-            <p className="card-sub">Who submitted, who reviewed, who approved — with dates.</p>
-          </div>
+      {/* ------------------------------------------------------ actions */}
+      {editable && (
+        <div className="form-footer">
+          <span className="footer-note">
+            {dirty ? 'You have unsaved changes.' : 'All changes saved.'}
+          </span>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => save()}
+            disabled={saving || !dirty}
+          >
+            <i className="fas fa-floppy-disk" /> Save draft
+          </button>
+          <button
+            type="button"
+            className="btn btn-cta btn-lg"
+            onClick={submit}
+            disabled={saving}
+          >
+            {units.length > 1 ? (
+              <>
+                <i className="fas fa-paper-plane" /> Submit inspection ({units.length} {module?.unit_noun_plural || 'units'})
+              </>
+            ) : (
+              <>
+                <i className="fas fa-paper-plane" /> Submit for review
+              </>
+            )}
+          </button>
         </div>
-        {data.events?.length ? (
-          <ul className="timeline">
-            {data.events.map((event) => (
-              <li key={event.id} className={event.event_type}>
-                <div className="t-head">
-                  <span className="t-title">{event.event_label}</span>
-                  <span className="t-meta">
-                    {event.user_name} · {formatDateTime(event.created_at)}
-                  </span>
-                </div>
-                {event.note && <div className="t-note">{event.note}</div>}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty icon="fa-clock" title="No events recorded yet" />
-        )}
-      </div>
+      )}
 
       {/* ----------------------------------------------------------- dialogs */}
       <ReasonDialog
@@ -542,6 +722,113 @@ export default function ReportDetail() {
 }
 
 /* ------------------------------------------------------------------ pieces */
+
+/** Has this checkpoint actually been answered? */
+function hasValue(entry) {
+  const value = entry?.value
+  return value !== undefined && value !== null && value !== ''
+}
+
+/**
+ * One collapsible check-list section, with its own progress and a bulk-fill
+ * control - an inspector marking a whole section Satisfactory is the common
+ * case, and doing it row by row is 17 clicks.
+ */
+/**
+ * One check-list section. Shut by default; the whole header is the toggle.
+ * "Set all" answers every question in the section in one go, which is the
+ * common case on a satisfactory lift.
+ */
+function ChecklistSection({
+  index,
+  section,
+  answers,
+  options,
+  editable,
+  missingKeys,
+  collapsed,
+  onToggle,
+  onChange,
+  onBulkFill,
+}) {
+  // Every dropdown in a section shares one option list in practice, so the
+  // labels become column headings and each row is just a line of radio dots.
+  const firstDropdown = section.checkpoints.find((cp) => cp.kind === 'dropdown')
+  const headerKey = firstDropdown?.options_key
+  const columns = headerKey ? options[headerKey]?.options || [] : []
+
+  return (
+    <div className={`section-card${collapsed ? ' is-closed' : ''}`} id={`section-${section.key}`}>
+      <div className="card-head" style={{ marginBottom: collapsed ? 0 : '1rem' }}>
+        <button
+          type="button"
+          className="section-toggle"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <i className="fas fa-chevron-down chevron" />
+          <h2>
+            {index}. {section.title}
+          </h2>
+        </button>
+
+        {editable && !collapsed && columns.length > 0 && (
+          <label className="bulk-fill">
+            Set all to
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onBulkFill(section, e.target.value)
+                e.target.value = ''
+              }}
+            >
+              <option value="">Choose…</option>
+              {columns.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+
+      {!collapsed && (
+        <div className="table-container">
+          <table className="check-table">
+            <thead>
+              <tr>
+                <th className="cp-col">Check point</th>
+                {columns.map((option) => (
+                  <th key={option.value} className="opt-col">
+                    {option.label}
+                  </th>
+                ))}
+                <th className="rem-col">Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.checkpoints.map((cp, row) => (
+                <CheckpointRow
+                  key={cp.key}
+                  number={`${index}.${row + 1}`}
+                  checkpoint={cp}
+                  value={answers[cp.key] || {}}
+                  columns={cp.options_key === headerKey ? columns : null}
+                  fallbackOptions={options[cp.options_key]?.options || []}
+                  editable={editable}
+                  flagged={missingKeys.has(cp.key)}
+                  onChange={(patch) => onChange(cp.key, patch)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Detail({ k, v }) {
   return (
     <div className="field">
@@ -551,85 +838,112 @@ function Detail({ k, v }) {
   )
 }
 
-function CheckpointRow({ checkpoint, value, options, editable, flagged, onChange }) {
-  const selected = options.find((o) => o.value === value.value)
+/**
+ * One check point: the question, a row of radio chips for the answer, and a
+ * remarks box beside them.
+ */
+function CheckpointRow({
+  number,
+  checkpoint,
+  value,
+  columns,
+  fallbackOptions,
+  editable,
+  flagged,
+  onChange,
+}) {
+  const answered = hasValue(value)
+  const rowStyle = flagged ? { background: 'rgba(245, 38, 46, 0.05)' } : undefined
 
-  const control = () => {
-    if (!editable) {
-      if (checkpoint.kind === 'dropdown') {
-        return selected ? (
-          <Pill tone={selected.severity === 'neutral' ? 'neutral' : selected.severity}>{selected.label}</Pill>
-        ) : (
-          <span className="muted">—</span>
-        )
-      }
-      return <span>{value.value || <span className="muted">—</span>}</span>
-    }
+  const label = (
+    <td className="cp-col">
+      <span className="cp-number">{number}</span>
+      <span>
+        {checkpoint.label}
+        {checkpoint.help_text && <span className="cell-sub">{checkpoint.help_text}</span>}
+      </span>
+    </td>
+  )
 
-    switch (checkpoint.kind) {
-      case 'dropdown':
-        return (
-          <select value={value.value || ''} onChange={(e) => onChange({ value: e.target.value })}>
-            <option value="">Select…</option>
-            {options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        )
-      case 'textarea':
-        return (
-          <textarea
-            rows={2}
-            value={value.value || ''}
-            onChange={(e) => onChange({ value: e.target.value })}
-          />
-        )
-      case 'number':
-        return (
-          <input type="number" value={value.value ?? ''} onChange={(e) => onChange({ value: e.target.value })} />
-        )
-      case 'date':
-        return (
-          <input type="date" value={value.value || ''} onChange={(e) => onChange({ value: e.target.value })} />
-        )
-      case 'checkbox':
-        return (
-          <input
-            type="checkbox"
-            checked={Boolean(value.value)}
-            onChange={(e) => onChange({ value: e.target.checked })}
-          />
-        )
-      default:
-        return <input type="text" value={value.value || ''} onChange={(e) => onChange({ value: e.target.value })} />
-    }
+  const remarks = (
+    <td className="rem-col">
+      {editable ? (
+        <input
+          type="text"
+          placeholder="Remarks"
+          value={value.remarks || ''}
+          onChange={(e) => onChange({ remarks: e.target.value })}
+        />
+      ) : (
+        <span className="cell-sub">{value.remarks || ''}</span>
+      )}
+    </td>
+  )
+
+  // A check point answered from the section's own option list: one dot per
+  // column, under the heading that names it.
+  if (columns) {
+    return (
+      <tr className={answered ? 'answered' : undefined} style={rowStyle}>
+        {label}
+        {columns.map((option) => (
+          <td key={option.value} className="opt-col">
+            <label className="dot" title={option.label}>
+              <input
+                type="radio"
+                name={`cp-${checkpoint.key}`}
+                checked={value.value === option.value}
+                disabled={!editable}
+                onChange={() => onChange({ value: option.value })}
+              />
+              <span className={option.severity || ''} />
+              <span className="sr-only">{option.label}</span>
+            </label>
+          </td>
+        ))}
+        {remarks}
+      </tr>
+    )
+  }
+
+  // Anything else - a free-text or date field, or a dropdown on a different
+  // list - spans the option columns and keeps its own control.
+  const span = { colSpan: 99 }
+  const common = {
+    value: value.value ?? '',
+    onChange: (e) => onChange({ value: e.target.value }),
+    disabled: !editable,
+  }
+
+  let control
+  if (checkpoint.kind === 'dropdown') {
+    control = (
+      <select {...common}>
+        <option value="">Select…</option>
+        {fallbackOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    )
+  } else if (checkpoint.kind === 'textarea') {
+    control = <textarea rows={2} {...common} />
+  } else if (checkpoint.kind === 'number') {
+    control = <input type="number" {...common} />
+  } else if (checkpoint.kind === 'date') {
+    control = <input type="date" {...common} />
+  } else {
+    control = <input type="text" {...common} />
   }
 
   return (
-    <tr style={flagged ? { background: 'rgba(245, 38, 46, 0.05)' } : undefined}>
-      <td>
-        <span className="cell-strong">
-          {checkpoint.label}
-          {checkpoint.required && <span style={{ color: 'var(--danger-color)' }}> *</span>}
-        </span>
-        {checkpoint.help_text && <div className="cell-sub">{checkpoint.help_text}</div>}
-        {checkpoint.reference && <div className="cell-sub">Ref: {checkpoint.reference}</div>}
+    <tr className={answered ? 'answered' : undefined} style={rowStyle}>
+      {label}
+      <td className="free-col" {...span}>
+        {control}
       </td>
-      <td className="field">{control()}</td>
-      <td className="field">
-        {editable ? (
-          <input
-            type="text"
-            placeholder="Remarks…"
-            value={value.remarks || ''}
-            onChange={(e) => onChange({ remarks: e.target.value })}
-          />
-        ) : (
-          value.remarks || <span className="muted">—</span>
-        )}
-      </td>
+      {remarks}
     </tr>
   )
 }
@@ -676,7 +990,7 @@ function PhotoSection({ reportId, title, subtitle, icon, kind, photos, editable,
             <input
               ref={inputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.jfif,.jpe,.pjpeg,.pjp,.tif,.tiff,.bmp,.webp"
               multiple
               style={{ display: 'none' }}
               onChange={upload}
@@ -698,7 +1012,7 @@ function PhotoSection({ reportId, title, subtitle, icon, kind, photos, editable,
         <div className="photo-grid">
           {photos.map((photo) => (
             <figure className="photo-tile" key={photo.id}>
-              <img src={photo.url} alt={photo.caption || photo.original_name} loading="lazy" />
+              <AuthedImage src={photo.url} alt={photo.caption || photo.original_name} style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }} />
               <figcaption className="photo-meta">
                 <span title={photo.caption || photo.original_name}>
                   {photo.caption || photo.original_name}
@@ -762,7 +1076,7 @@ function ReportPhotoSlot({ reportId, slot, photos, editable, onChanged }) {
   return (
     <figure className="photo-tile">
       {first ? (
-        <img src={first.url} alt={slot.label} loading="lazy" />
+        <AuthedImage src={first.url} alt={slot.label} style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }} />
       ) : (
         <div
           style={{
@@ -788,7 +1102,7 @@ function ReportPhotoSlot({ reportId, slot, photos, editable, onChanged }) {
             <input
               ref={inputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.jfif,.jpe,.pjpeg,.pjp,.tif,.tiff,.bmp,.webp"
               style={{ display: 'none' }}
               onChange={upload}
             />
@@ -890,3 +1204,4 @@ function ApproveDialog({ open, report, onClose, onConfirm }) {
     </Modal>
   )
 }
+

@@ -34,6 +34,18 @@ export const clientApi = {
   updateContact: (id, contactId, payload) =>
     unwrap(api.patch(`/clients/${id}/contacts/${contactId}`, payload)),
   deleteContact: (id, contactId) => unwrap(api.delete(`/clients/${id}/contacts/${contactId}`)),
+  // Every client in one light list, for the searchable picker.
+  directory: () => unwrap(api.get('/clients/directory')),
+  sbuSubSectorMap: () => unwrap(api.get('/clients/sbu-subsector-map')),
+  // Ask for a client that is not on the approved list yet.
+  request: (payload) => unwrap(api.post('/clients/request', payload)),
+}
+
+export const clientApprovalApi = {
+  list: () => unwrap(api.get('/client-approvals')),
+  count: () => unwrap(api.get('/client-approvals/count')),
+  approve: (id) => unwrap(api.post(`/client-approvals/${id}/approve`)),
+  reject: (id) => unwrap(api.post(`/client-approvals/${id}/reject`)),
 }
 
 export const jobApi = {
@@ -59,6 +71,15 @@ export const equipmentApi = {
 export const reportApi = {
   list: (params) => unwrap(api.get('/reports', { params })),
   queue: (params) => unwrap(api.get('/reports/queue', { params })),
+  // Visits (as one item each) and standalone reports awaiting review.
+  reviewQueue: (params) => unwrap(api.get('/reports/review-queue', { params })),
+  pdfUrl: (id) => `/api/reports/${id}/pdf`,
+  // A short-lived link that opens a report's or visit's PDF in a new tab.
+  viewLink: (kind, id, extra = {}) => unwrap(api.post('/reports/view-link', { kind, id, ...extra })),
+  // Revision control: every submission, with what changed in each.
+  revisions: (id) => unwrap(api.get(`/reports/${id}/revisions`)),
+  revision: (id, revision) => unwrap(api.get(`/reports/${id}/revisions/${revision}`)),
+  revisionFileUrl: (id, revision, format) => `/api/reports/${id}/revisions/${revision}/file?format=${format}`,
   get: (id) => unwrap(api.get(`/reports/${id}`)),
   create: (payload) => unwrap(api.post('/reports', payload)),
   update: (id, payload) => unwrap(api.patch(`/reports/${id}`, payload)),
@@ -91,6 +112,11 @@ export const inspectionSetApi = {
   generate: (id, force) =>
     unwrap(api.post(`/inspection-sets/${id}/generate`, null, { params: force ? { force: 1 } : {} })),
   downloadUrl: (id) => `/api/inspection-sets/${id}/download`,
+  pdfUrl: (id) => `/api/inspection-sets/${id}/pdf`,
+  // Submit every unit of the visit that is still being worked on, in one go.
+  submit: (id) => unwrap(api.post(`/inspection-sets/${id}/submit`)),
+  approve: (id, payload) => unwrap(api.post(`/inspection-sets/${id}/approve`, payload)),
+  returnForCorrection: (id, reason) => unwrap(api.post(`/inspection-sets/${id}/return`, { reason })),
   uploadPhotos: (id, files, slotKey, caption) => {
     const form = new FormData()
     Array.from(files).forEach((file) => form.append('files', file))

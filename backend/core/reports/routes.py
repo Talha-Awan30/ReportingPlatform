@@ -22,7 +22,7 @@ from models import (
 )
 from models.base import utcnow
 from modules import get_module
-from services import docx_generator
+from services import docx_generator, revisions
 from services.numbering import next_report_number
 from services.storage import delete_photo_file, photo_path, save_report_photo
 from utils import paginate, roles_required
@@ -80,12 +80,31 @@ def _assert_can_edit(report):
 @bp.get("")
 @roles_required()
 def list_reports():
+    """Reports, newest first. With ?group_visits=1 a multi-unit visit is one
+    row - its first unit, carrying a `visit` summary of every unit."""
+    from sqlalchemy.orm import aliased
+
+    from models import InspectionSet
+
     query = _visible_reports()
+    group = request.args.get("group_visits") in ("1", "true")
+    unit = aliased(Report)
 
     if module_slug := request.args.get("module_slug"):
         query = query.filter(Report.module_slug == module_slug)
     if status := parse_enum(ReportStatus, request.args.get("status"), "status"):
-        query = query.filter(Report.status == status)
+        if group:
+            # A visit matches when any of its units has the status.
+            query = query.filter(
+                db.or_(
+                    db.and_(Report.inspection_set_id.is_(None), Report.status == status),
+                    db.exists().where(
+                        unit.inspection_set_id == Report.inspection_set_id, unit.status == status
+                    ),
+                )
+            )
+        else:
+            query = query.filter(Report.status == status)
     if job_id := request.args.get("job_id", type=int):
         query = query.filter(Report.job_id == job_id)
     if equipment_id := request.args.get("equipment_id", type=int):
@@ -105,26 +124,173 @@ def list_reports():
         query = (
             query.outerjoin(Equipment, Report.equipment_id == Equipment.id)
             .outerjoin(Job, Report.job_id == Job.id)
+            .outerjoin(InspectionSet, Report.inspection_set_id == InspectionSet.id)
             .filter(
                 db.or_(
                     Report.report_number.ilike(like),
                     Equipment.tag_number.ilike(like),
                     Job.job_number.ilike(like),
+                    InspectionSet.set_number.ilike(like),
                 )
             )
         )
 
-    return paginate(query.order_by(Report.updated_at.desc()))
+    if not group:
+        return paginate(query.order_by(Report.updated_at.desc()))
+
+    # One row per visit: keep only its first unit (lowest id).
+    first_unit = (
+        db.select(db.func.min(unit.id)).where(unit.inspection_set_id == Report.inspection_set_id)
+    ).scalar_subquery()
+    query = query.filter(db.or_(Report.inspection_set_id.is_(None), Report.id == first_unit))
+    return paginate(query.order_by(Report.updated_at.desc()), serializer=_with_visit_summary)
+
+
+# The status a whole visit shows: the one needing attention soonest wins.
+VISIT_STATUS_ORDER = [
+    ReportStatus.RETURNED,
+    ReportStatus.DRAFT,
+    ReportStatus.SUBMITTED,
+    ReportStatus.CLIENT_QUERY,
+    ReportStatus.APPROVED,
+    ReportStatus.CLIENT_APPROVED,
+]
+
+
+def _with_visit_summary(report):
+    data = report.to_dict()
+    record = report.inspection_set
+    if record is None:
+        return data
+    units = sorted(record.reports, key=lambda r: r.sequence)
+    leading = min(
+        units,
+        key=lambda r: VISIT_STATUS_ORDER.index(r.status) if r.status in VISIT_STATUS_ORDER else 99,
+    )
+    shown = leading.to_dict()
+    spec = get_module(record.module_slug)
+    data["visit"] = {
+        "set_id": record.id,
+        "set_number": record.set_number,
+        "unit_count": len(units),
+        "units": [{"id": u.id, "sequence": u.sequence} for u in units],
+        "unit_noun": spec.unit_noun if spec else "unit",
+        "unit_noun_plural": spec.unit_noun_plural if spec else "units",
+        "tags": [u.to_dict().get("equipment_tag") or f"#{u.sequence}" for u in units],
+        "revision": max(u.revision for u in units),
+        "status": leading.status.value,
+        "status_label": shown.get("status_label"),
+        "status_severity": shown.get("status_severity"),
+        "expires": min(
+            (u.certificate_expiry_date for u in units if u.certificate_expiry_date), default=None
+        ),
+    }
+    if data["visit"]["expires"]:
+        data["visit"]["expires"] = data["visit"]["expires"].isoformat()
+    return data
+
+
+@bp.get("/review-queue")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def review_items():
+    """What is waiting for a reviewer, latest submission first.
+
+    A multi-unit visit is reviewed as ONE item - its combined report (title
+    page plus every unit) - once every unit is in. A report that is not part
+    of a visit is its own item.
+    """
+    from models import InspectionSet
+    from modules import get_module as module_of
+
+    module_slug = request.args.get("module_slug")
+    items = []
+
+    sets = InspectionSet.query.filter(
+        InspectionSet.reports.any(Report.status == ReportStatus.SUBMITTED)
+    )
+    if module_slug:
+        sets = sets.filter(InspectionSet.module_slug == module_slug)
+    for record in sets:
+        if not set_ready_for_review(record):
+            continue
+        submitted = [r for r in record.reports if r.status is ReportStatus.SUBMITTED]
+        first = record.reports[0]
+        spec = module_of(record.module_slug)
+        items.append({
+            "kind": "set",
+            "id": record.id,
+            "number": record.set_number,
+            "module_slug": record.module_slug,
+            "module_name": spec.name if spec else record.module_slug,
+            "item": first.to_dict().get("equipment_type") if first else None,
+            "unit_count": len(record.reports),
+            "units": [{"id": r.id, "sequence": r.sequence} for r in record.reports],
+            "unit_noun": spec.unit_noun if spec else "unit",
+            "unit_noun_plural": spec.unit_noun_plural if spec else "units",
+            "client_name": record.job.client.name if record.job and record.job.client else None,
+            "job_number": record.job.job_number if record.job else None,
+            "inspector_name": first.inspector.full_name if first and first.inspector else None,
+            "submitted_at": max(r.submitted_at for r in submitted).isoformat(),
+            "revision": max(r.revision for r in record.reports),
+            "has_pdf": bool(record.pdf_path),
+        })
+
+    singles = Report.query.filter(
+        Report.status == ReportStatus.SUBMITTED, Report.inspection_set_id.is_(None)
+    )
+    if module_slug:
+        singles = singles.filter(Report.module_slug == module_slug)
+    for report in singles:
+        spec = module_of(report.module_slug)
+        data = report.to_dict()
+        items.append({
+            "kind": "report",
+            "id": report.id,
+            "number": report.report_number,
+            "module_slug": report.module_slug,
+            "module_name": spec.name if spec else report.module_slug,
+            "item": data.get("equipment_type"),
+            "equipment_tag": data.get("equipment_tag"),
+            "unit_count": 1,
+            "units": [{"id": report.id, "sequence": report.sequence}],
+            "client_name": data.get("client_name"),
+            "job_number": data.get("job_number"),
+            "inspector_name": data.get("inspector_name"),
+            "submitted_at": report.submitted_at.isoformat() if report.submitted_at else None,
+            "revision": report.revision,
+            "has_pdf": bool(report.pdf_path),
+        })
+
+    items.sort(key=lambda i: i["submitted_at"] or "", reverse=True)
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(int(request.args.get("per_page", 25)), 100))
+    except ValueError:
+        page, per_page = 1, 25
+    total = len(items)
+    pages = max(1, -(-total // per_page))
+    return {
+        "items": items[(page - 1) * per_page: page * per_page],
+        "meta": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1,
+        },
+    }
 
 
 @bp.get("/queue")
 @roles_required(Role.REVIEWER, Role.ADMIN)
 def review_queue():
-    """Every submitted report waiting for review, oldest first."""
+    """Every submitted report waiting for review, latest submission first."""
     query = Report.query.filter(Report.status == ReportStatus.SUBMITTED)
     if module_slug := request.args.get("module_slug"):
         query = query.filter(Report.module_slug == module_slug)
-    return paginate(query.order_by(Report.submitted_at.asc()))
+    return paginate(query.order_by(Report.submitted_at.desc(), Report.id.desc()))
 
 
 @bp.get("/<int:report_id>")
@@ -152,6 +318,9 @@ def get_report(report_id):
                 "report_number": r.report_number,
                 "status": r.status.value,
                 "is_editable": r.is_editable,
+                "identification": ((r.data or {}).get("identification") or {}).get("value")
+                if isinstance((r.data or {}).get("identification"), dict)
+                else None,
             }
             for r in sorted(record.reports, key=lambda r: r.sequence)
         ]
@@ -256,35 +425,21 @@ def submit_report(report_id):
     _assert_can_edit(report)
 
     spec = get_module(report.module_slug)
-    _assert_required_answered(report, spec)
-    _assert_required_photos(report, spec)
-
-    # The inspector typed the unit's ID rather than picking from the register,
-    # so match or create the equipment row now - expiry tracking needs it.
-    from core.inspection_sets.routes import resolve_equipment_for
-
-    resolve_equipment_for(report, spec)
-
     user = current_user()
-    report.status = ReportStatus.SUBMITTED
-    report.submitted_at = utcnow()
-    report.log_event(ReportEventType.SUBMITTED, user)
-
-    _generate(report, spec, user)
+    submit_unit(report, spec, user)
     message = "Submitted for review."
 
-    # Once every unit on the visit is in, build the combined document so the
-    # title page and all units are ready to download without another click.
+    # Once every unit on the visit is in, build the combined document - and its
+    # PDF for the reviewer - so the whole visit goes to review as one report.
     record = report.inspection_set
     if record is not None:
         db.session.flush()
-        if all(r.status is not ReportStatus.DRAFT for r in record.reports):
+        if all(r.status not in (ReportStatus.DRAFT, ReportStatus.RETURNED) for r in record.reports):
             try:
-                record.docx_path = docx_generator.generate_set(record, spec)
-                record.generated_at = utcnow()
+                build_set_documents(record, spec)
                 message = (
                     f"Submitted. All {len(record.reports)} {spec.unit_noun_plural} are in - "
-                    "the combined report is ready to download."
+                    "the combined report has gone to the reviewer."
                 )
             except Exception:  # noqa: BLE001 - never block a submit on the document
                 import logging
@@ -308,13 +463,7 @@ def return_report(report_id):
     data = request.get_json(silent=True) or {}
     require_fields(data, "reason")
 
-    user = current_user()
-    report.status = ReportStatus.RETURNED
-    report.return_reason = data["reason"]
-    report.reviewer_id = user.id
-    report.reviewed_at = utcnow()
-    report.revision += 1  # a corrected report is a new revision
-    report.log_event(ReportEventType.RETURNED, user, note=data["reason"])
+    send_back(report, current_user(), data["reason"])
     db.session.commit()
 
     return {"report": report.to_dict(detail=True), "message": "Returned to the inspector."}
@@ -328,23 +477,181 @@ def approve_report(report_id):
         raise ApiError("Only submitted reports can be approved.", 409, "invalid_transition")
 
     data = request.get_json(silent=True) or {}
-    user = current_user()
-    spec = get_module(report.module_slug)
-
-    report.status = ReportStatus.APPROVED
-    report.reviewer_id = user.id
-    report.reviewed_at = utcnow()
-    report.return_reason = None
-
-    _apply_validity(report, spec, data)
-    _sync_equipment_certification(report)
-    report.log_event(ReportEventType.APPROVED, user, note=data.get("note"))
-
-    # Regenerate so the released document carries the reviewer's name.
-    _generate(report, spec, user)
+    approve(report, current_user(), get_module(report.module_slug), data)
     db.session.commit()
 
     return {"report": report.to_dict(detail=True), "message": "Approved and released to the client."}
+
+
+@bp.get("/<int:report_id>/revisions")
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+def report_revisions(report_id):
+    """Every submitted revision, newest first, with what changed in each."""
+    from modules.blueprint_factory import resolve_options
+
+    report = _load(report_id)
+    spec = get_module(report.module_slug)
+    options = resolve_options(spec) if spec else {}
+    return {"revisions": revisions.history(report, spec, options), "current": report.revision}
+
+
+@bp.get("/<int:report_id>/revisions/<int:revision>")
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+def report_revision(report_id, revision):
+    """Everything one past revision held - for viewing it read-only."""
+    report = _load(report_id)
+    row = next((r for r in report.revisions if r.revision == revision), None)
+    if row is None:
+        raise ApiError(f"Rev {revision} not found.", 404, "not_found")
+    return {
+        "revision": row.revision,
+        "data": row.data or {},
+        "title_page": row.title_page,
+        "photo_ids": [p["id"] for p in (row.photos or []) if p.get("source") == "report"],
+        "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
+        "submitted_by": row.submitted_by_name,
+        "outcome": row.outcome,
+        "review_comment": row.review_comment,
+        "reviewed_by": row.reviewed_by_name,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+    }
+
+
+@bp.get("/<int:report_id>/revisions/<int:revision>/file")
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+def report_revision_file(report_id, revision):
+    """The PDF (?format=pdf) or Word file of one past revision."""
+    report = _load(report_id)
+    kind = "pdf" if request.args.get("format") == "pdf" else "docx"
+    path = revisions.revision_file(report, revision, kind)
+    if path is None:
+        raise ApiError(f"Rev {revision} has no {kind.upper()} file.", 404, "not_found")
+    return send_file(
+        path,
+        mimetype="application/pdf" if kind == "pdf" else None,
+        as_attachment=request.args.get("download") != "0",
+        # Stored names already carry the number and revision, e.g. ELV-SET-...-rev1.pdf.
+        download_name=os.path.basename(path),
+    )
+
+
+@bp.get("/<int:report_id>/pdf")
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+def report_pdf(report_id):
+    """The report as a PDF (inline, or ?download=1)."""
+    report = _load(report_id)
+    return send_file(
+        report_pdf_file(report),
+        mimetype="application/pdf",
+        as_attachment=request.args.get("download") == "1",
+        download_name=f"{report.report_number}.pdf",
+    )
+
+
+# ------------------------------------------------- PDF in a new browser tab
+# A new tab cannot carry the app's bearer token, so the reviewer is handed a
+# short-lived signed link instead. The link names the PDF, so the browser's own
+# viewer shows the report number as the tab title.
+VIEW_LINK_SALT = "report-pdf-view"
+VIEW_LINK_SECONDS = 10 * 60
+
+
+def _view_signer():
+    from flask import current_app
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=VIEW_LINK_SALT)
+
+
+@bp.post("/view-link")
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+def create_view_link():
+    """A 10-minute link that opens a report's or a visit's PDF in a new tab."""
+    from core.inspection_sets.routes import _load as load_set
+
+    data = request.get_json(silent=True) or {}
+    kind = data.get("kind")
+    try:
+        target_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        raise ApiError("Which report?", 422, "validation_error", {"field": "id"})
+
+    # Loading through the normal routes applies the same visibility rules.
+    if kind == "set":
+        number = load_set(target_id).set_number
+    elif kind == "report":
+        number = _load(target_id).report_number
+    elif kind == "revision":
+        report = _load(target_id)
+        revision = int(data.get("revision", -1))
+        path = revisions.revision_file(report, revision, "pdf")
+        if path is None:
+            raise ApiError(f"Rev {revision} has no PDF.", 404, "not_found")
+        number = os.path.splitext(os.path.basename(path))[0]
+    else:
+        raise ApiError("kind must be 'set', 'report' or 'revision'.", 422, "validation_error", {"field": "kind"})
+
+    claim = {"k": kind, "i": target_id, "u": current_user().id}
+    if kind == "revision":
+        claim["r"] = revision
+    token = _view_signer().dumps(claim)
+    return {"url": f"/api/reports/view/{token}/{number}.pdf", "expires_in": VIEW_LINK_SECONDS}
+
+
+@bp.get("/view/<token>/<filename>")
+def view_pdf(token, filename):
+    """Serve the PDF behind a signed view link - no bearer token needed."""
+    from itsdangerous import BadSignature, SignatureExpired
+
+    from core.inspection_sets.routes import set_pdf_file
+    from models import InspectionSet, User
+
+    try:
+        claim = _view_signer().loads(token, max_age=VIEW_LINK_SECONDS)
+    except SignatureExpired:
+        raise ApiError("This link has expired. Open the report again from the review queue.", 410, "expired")
+    except BadSignature:
+        raise ApiError("This link is not valid.", 404, "not_found")
+
+    user = db.session.get(User, claim.get("u"))
+    if user is None or not user.is_active or user.role is Role.CLIENT:
+        raise ApiError("This link is not valid.", 404, "not_found")
+
+    if claim.get("k") == "revision":
+        report = db.session.get(Report, claim.get("i"))
+        path = revisions.revision_file(report, claim.get("r"), "pdf") if report else None
+        if path is None:
+            raise ApiError("Report not found.", 404, "not_found")
+    elif claim.get("k") == "set":
+        record = db.session.get(InspectionSet, claim.get("i"))
+        if record is None:
+            raise ApiError("Report not found.", 404, "not_found")
+        path = set_pdf_file(record)
+    else:
+        report = db.session.get(Report, claim.get("i"))
+        if report is None:
+            raise ApiError("Report not found.", 404, "not_found")
+        path = report_pdf_file(report)
+
+    return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=filename)
+
+
+def report_pdf_file(report):
+    """Absolute path of the report's PDF, building it if needed."""
+    from services.storage import generated_dir
+
+    if not report.docx_path:
+        raise ApiError("No document has been generated for this report yet.", 404, "not_generated")
+    if not report.pdf_path or not os.path.exists(os.path.join(generated_dir(), report.pdf_path)):
+        if not _build_pdf(report):
+            raise ApiError(
+                "A PDF preview is not available on this server. Download the Word file instead.",
+                503,
+                "pdf_unavailable",
+            )
+        db.session.commit()
+
+    return os.path.join(generated_dir(), report.pdf_path)
 
 
 @bp.post("/<int:report_id>/client-approve")
@@ -484,6 +791,101 @@ def download_document(report_id):
         raise ApiError("The generated document is missing from storage.", 404, "file_missing")
 
     return send_file(path, as_attachment=True, download_name=report.docx_path)
+
+
+# ------------------------------------------------------------ review actions
+def check_ready_to_submit(report, spec):
+    """Raise ApiError if required answers or photos are still missing."""
+    _assert_required_answered(report, spec)
+    _assert_required_photos(report, spec)
+
+
+def submit_unit(report, spec, user):
+    """Submit one report: validate, number the revision, build its documents."""
+    check_ready_to_submit(report, spec)
+
+    # The inspector typed the unit's ID rather than picking from the register,
+    # so match or create the equipment row now - expiry tracking needs it.
+    from core.inspection_sets.routes import resolve_equipment_for
+
+    resolve_equipment_for(report, spec)
+
+    # Rev 0 is the first submission; a corrected, resubmitted report is the next.
+    if report.status is ReportStatus.RETURNED:
+        report.revision += 1
+    report.status = ReportStatus.SUBMITTED
+    report.submitted_at = utcnow()
+    report.log_event(ReportEventType.SUBMITTED, user, meta={"revision": report.revision})
+
+    _generate(report, spec, user)
+    if report.inspection_set is None:
+        _build_pdf(report)
+    revisions.snapshot(report, user)
+
+
+def approve(report, user, spec, data):
+    """Approve one submitted report and release it to the client."""
+    report.status = ReportStatus.APPROVED
+    report.reviewer_id = user.id
+    report.reviewed_at = utcnow()
+    report.return_reason = None
+
+    _apply_validity(report, spec, data)
+    _sync_equipment_certification(report)
+    report.log_event(ReportEventType.APPROVED, user, note=data.get("note"))
+
+    # Regenerate so the released document carries the reviewer's name.
+    _generate(report, spec, user)
+    revisions.mark_outcome(report, "approved", user, data.get("note"))
+
+
+def send_back(report, user, reason):
+    """Return one submitted report to its inspector with the reviewer's comments.
+
+    The revision number moves on when the inspector resubmits the correction.
+    """
+    report.status = ReportStatus.RETURNED
+    report.return_reason = reason
+    report.reviewer_id = user.id
+    report.reviewed_at = utcnow()
+    report.log_event(ReportEventType.RETURNED, user, note=reason, meta={"revision": report.revision})
+    revisions.mark_outcome(report, "returned", user, reason)
+
+
+def set_ready_for_review(record):
+    """Every unit is in, and at least one is waiting on a reviewer."""
+    statuses = [r.status for r in record.reports]
+    return (
+        bool(statuses)
+        and ReportStatus.SUBMITTED in statuses
+        and all(s not in (ReportStatus.DRAFT, ReportStatus.RETURNED) for s in statuses)
+    )
+
+
+def build_set_documents(record, spec):
+    """The visit's combined Word report, plus its PDF for the preview."""
+    from services.pdf_converter import try_docx_to_pdf
+    from services.storage import generated_dir
+
+    revision = max((r.revision for r in record.reports), default=0)
+    record.docx_path = docx_generator.generate_set(record, spec, revision=revision)
+    record.generated_at = utcnow()
+    pdf = try_docx_to_pdf(os.path.join(generated_dir(), record.docx_path))
+    record.pdf_path = os.path.basename(pdf) if pdf else None
+    revisions.attach_set_documents(record)
+    return record.pdf_path
+
+
+def _build_pdf(report):
+    """A PDF of the report's current Word document. Returns its name or None."""
+    from services.pdf_converter import try_docx_to_pdf
+    from services.storage import generated_dir
+
+    if not report.docx_path:
+        return None
+    pdf = try_docx_to_pdf(os.path.join(generated_dir(), report.docx_path))
+    report.pdf_path = os.path.basename(pdf) if pdf else None
+    return report.pdf_path
 
 
 # -------------------------------------------------------------------- helpers

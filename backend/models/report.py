@@ -85,7 +85,8 @@ class Report(BaseModel):
     )
 
     status = db.Column(db.Enum(ReportStatus), nullable=False, default=ReportStatus.DRAFT, index=True)
-    revision = db.Column(db.Integer, nullable=False, default=1)
+    # 0 on the first submission; +1 each time a returned report is resubmitted.
+    revision = db.Column(db.Integer, nullable=False, default=0)
 
     # When this visit covers several units, the shared title page lives on the
     # set and `sequence` is this unit's position within it (1-based).
@@ -139,6 +140,13 @@ class Report(BaseModel):
         cascade="all, delete-orphan",
         lazy="selectin",
         order_by="ReportEvent.created_at.desc()",
+    )
+    revisions = db.relationship(
+        "ReportRevision",
+        back_populates="report",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ReportRevision.revision",
     )
 
     # ---------------------------------------------------------------- helpers
@@ -236,3 +244,44 @@ class ReportEvent(BaseModel):
         data = super().to_dict(exclude=exclude)
         data["event_label"] = self.event_type.value.replace("_", " ").title()
         return data
+
+
+class ReportRevision(BaseModel):
+    """What a report looked like when it was submitted - one row per revision.
+
+    Rev 0 is the first submission; each resubmission after a return adds the
+    next. The snapshot keeps every answer, the shared title page (for a unit of
+    a visit), the photo list and the documents produced, so the website can
+    show what each revision contained and what changed between them.
+    """
+
+    __tablename__ = "report_revisions"
+    __table_args__ = (db.UniqueConstraint("report_id", "revision", name="uq_report_revision"),)
+
+    report_id = db.Column(
+        db.Integer, db.ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision = db.Column(db.Integer, nullable=False)
+
+    submitted_at = db.Column(db.DateTime)
+    submitted_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    submitted_by_name = db.Column(db.String(150))
+
+    data = db.Column(db.JSON, nullable=False, default=dict)
+    title_page = db.Column(db.JSON)
+    photos = db.Column(db.JSON, nullable=False, default=list)
+
+    # Documents of this revision (names under GENERATED_FOLDER). For a unit of
+    # a visit, set_* hold the combined report the reviewer actually saw.
+    docx_path = db.Column(db.String(500))
+    pdf_path = db.Column(db.String(500))
+    set_docx_path = db.Column(db.String(500))
+    set_pdf_path = db.Column(db.String(500))
+
+    # The reviewer's decision on this revision: pending / returned / approved.
+    outcome = db.Column(db.String(20), nullable=False, default="pending")
+    review_comment = db.Column(db.Text)
+    reviewed_by_name = db.Column(db.String(150))
+    reviewed_at = db.Column(db.DateTime)
+
+    report = db.relationship("Report", back_populates="revisions")

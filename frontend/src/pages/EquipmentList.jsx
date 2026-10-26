@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { clientApi, equipmentApi } from '../api/endpoints'
+import { equipmentApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi, useDebounced } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
+import ClientSelect from '../components/ClientSelect'
 import Spinner from '../components/Spinner'
 import { useToast } from '../components/Toast'
 import { CertificationPill, Empty, Modal, Pager, Select, TextArea, TextInput, formatDate } from '../components/ui'
@@ -30,7 +31,6 @@ export default function EquipmentList() {
   const clientId = params.get('client_id') || ''
   const certStatus = params.get('certification_status') || ''
 
-  const clients = useApi(() => clientApi.list({ per_page: 200 }), [])
   const types = useApi(() => equipmentApi.types({ active_only: 'true' }), [])
   const equipment = useApi(
     () =>
@@ -91,12 +91,7 @@ export default function EquipmentList() {
               }}
             />
           </div>
-          <select value={clientId} onChange={(e) => setFilter('client_id', e.target.value)}>
-            <option value="">All clients</option>
-            {(clients.data?.items || []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <ClientSelect variant="filter" value={clientId} onChange={(id) => setFilter('client_id', id)} />
           <select value={certStatus} onChange={(e) => setFilter('certification_status', e.target.value)}>
             <option value="">Any certification status</option>
             {CERT_FILTERS.map((f) => (
@@ -155,7 +150,6 @@ export default function EquipmentList() {
 
       <EquipmentModal
         open={creating}
-        clients={clients.data?.items || []}
         types={types.data?.types || []}
         onClose={() => setCreating(false)}
         onSave={create}
@@ -164,7 +158,7 @@ export default function EquipmentList() {
   )
 }
 
-export function EquipmentModal({ open, equipment, clients = [], types = [], onClose, onSave }) {
+export function EquipmentModal({ open, equipment, types = [], onClose, onSave }) {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [openedFor, setOpenedFor] = useState(null)
@@ -213,14 +207,12 @@ export function EquipmentModal({ open, equipment, clients = [], types = [], onCl
       }
     >
       <form id="equipment-form" className="field-grid" onSubmit={submit}>
-        <Select
+        <ClientSelect
           label="Client"
           required
-          placeholder="Select a client…"
           value={form.client_id || ''}
-          onChange={set('client_id')}
+          onChange={(id) => setForm((f) => ({ ...f, client_id: id }))}
           disabled={Boolean(equipment)}
-          options={clients.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` }))}
         />
         <Select
           label="Equipment type"

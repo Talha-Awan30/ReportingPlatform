@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { alertApi, clientApi, equipmentApi } from '../api/endpoints'
+import { alertApi, equipmentApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import { ROLES, useAuth } from '../auth/AuthContext'
@@ -21,7 +21,6 @@ export default function EquipmentDetail() {
 
   const equipment = useApi(() => equipmentApi.get(id), [id])
   const alerts = useApi(() => alertApi.list({ equipment_id: id, per_page: 20 }), [id])
-  const clients = useApi(() => (canEdit ? clientApi.list({ per_page: 200 }) : null), [canEdit])
   const types = useApi(() => (canEdit ? equipmentApi.types() : null), [canEdit])
 
   if (equipment.loading) return <Spinner full label="Loading equipment" />
@@ -207,7 +206,6 @@ export default function EquipmentDetail() {
         <EquipmentModal
           open={editing}
           equipment={data}
-          clients={clients.data?.items || []}
           types={types.data?.types || []}
           onClose={() => setEditing(false)}
           onSave={save}

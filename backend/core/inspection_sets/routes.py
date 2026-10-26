@@ -331,8 +331,9 @@ def generate_set_document(set_id):
             {"incomplete": incomplete},
         )
 
-    record.docx_path = docx_generator.generate_set(record, spec)
-    record.generated_at = utcnow()
+    from core.reports.routes import build_set_documents
+
+    build_set_documents(record, spec)
     db.session.commit()
 
     return {"set": record.to_dict(), "message": "Combined report generated."}
@@ -352,6 +353,163 @@ def download_set_document(set_id):
         raise ApiError("The generated document is missing from storage.", 404, "file_missing")
 
     return send_file(path, as_attachment=True, download_name=record.docx_path)
+
+
+@bp.get("/<int:set_id>/pdf")
+@roles_required(*STAFF)
+def set_pdf(set_id):
+    """The combined report as a PDF (inline, or ?download=1)."""
+    record = _load(set_id)
+    path = set_pdf_file(record)
+    return send_file(
+        path,
+        mimetype="application/pdf",
+        as_attachment=request.args.get("download") == "1",
+        download_name=f"{record.set_number}.pdf",
+    )
+
+
+def set_pdf_file(record):
+    """Absolute path of the visit's combined PDF, building it if needed."""
+    from core.reports.routes import build_set_documents
+    from services.pdf_converter import try_docx_to_pdf
+    from services.storage import generated_dir
+
+    if not record.docx_path:
+        if any(r.status is ReportStatus.DRAFT for r in record.reports):
+            raise ApiError("Some units are still drafts - the combined report is not built yet.", 404, "not_generated")
+        build_set_documents(record, get_module(record.module_slug))
+        db.session.commit()
+
+    if not record.pdf_path or not os.path.exists(os.path.join(generated_dir(), record.pdf_path)):
+        pdf = try_docx_to_pdf(os.path.join(generated_dir(), record.docx_path))
+        if not pdf:
+            raise ApiError(
+                "A PDF preview is not available on this server. Download the Word file instead.",
+                503,
+                "pdf_unavailable",
+            )
+        record.pdf_path = os.path.basename(pdf)
+        db.session.commit()
+
+    return os.path.join(generated_dir(), record.pdf_path)
+
+
+@bp.post("/<int:set_id>/submit")
+@roles_required(*STAFF)
+def submit_set(set_id):
+    """Submit the whole visit - every unit still being worked on - in one go.
+
+    Every unit is checked first; if any is incomplete nothing is submitted and
+    the error names each unit with what it is missing.
+    """
+    from core.reports.routes import build_set_documents, check_ready_to_submit, submit_unit
+
+    record = _load(set_id)
+    _assert_editable(record)
+    spec = get_module(record.module_slug)
+    user = current_user()
+
+    pending = [r for r in record.reports if r.status in (ReportStatus.DRAFT, ReportStatus.RETURNED)]
+    if not pending:
+        raise ApiError("Every unit on this visit has already been submitted.", 409, "nothing_to_submit")
+    if user.role is Role.INSPECTOR and any(r.inspector_id != user.id for r in pending):
+        raise ApiError("You can only submit units you inspected.", 403, "forbidden")
+
+    problems = []
+    for report in pending:
+        try:
+            check_ready_to_submit(report, spec)
+        except ApiError as exc:
+            problems.append({
+                "id": report.id,
+                "sequence": report.sequence,
+                "message": exc.message,
+                "missing": exc.details.get("missing", []),
+            })
+    if problems:
+        noun = spec.unit_noun.capitalize()
+        summary = "; ".join(f"{noun} #{p['sequence']}: {p['message']}" for p in problems)
+        raise ApiError(f"Not submitted. {summary}", 422, "incomplete_set", {"units": problems})
+
+    for report in pending:
+        submit_unit(report, spec, user)
+    db.session.flush()
+
+    message = (
+        f"Submitted - all {len(record.reports)} {spec.unit_noun_plural} have gone to the reviewer."
+        if len(record.reports) > 1
+        else "Submitted for review."
+    )
+    try:
+        build_set_documents(record, spec)
+    except Exception:  # noqa: BLE001 - never block a submit on the document
+        import logging
+
+        logging.getLogger(__name__).exception("Could not build the combined report for set %s", record.set_number)
+    db.session.commit()
+
+    return {"set": record.to_dict(detail=True), "message": message}
+
+
+# --------------------------------------------------------------------- review
+def _load_for_review(set_id):
+    from core.reports.routes import set_ready_for_review
+
+    record = _load(set_id)
+    if not set_ready_for_review(record):
+        raise ApiError(
+            "This visit is not waiting for review - every unit must be submitted first.",
+            409,
+            "invalid_transition",
+        )
+    return record
+
+
+@bp.post("/<int:set_id>/approve")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def approve_set(set_id):
+    """Approve every submitted unit of the visit in one go."""
+    from core.reports.routes import approve
+
+    record = _load_for_review(set_id)
+    spec = get_module(record.module_slug)
+    data = request.get_json(silent=True) or {}
+    user = current_user()
+
+    approved = [r for r in record.reports if r.status is ReportStatus.SUBMITTED]
+    for report in approved:
+        approve(report, user, spec, data)
+    db.session.commit()
+
+    return {
+        "set": record.to_dict(),
+        "message": f"{record.set_number}: {len(approved)} {spec.unit_noun_plural if len(approved) != 1 else spec.unit_noun} approved.",
+    }
+
+
+@bp.post("/<int:set_id>/return")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def return_set(set_id):
+    """Send the whole visit back to the inspector with the reviewer's comments."""
+    from core.reports.routes import send_back
+
+    record = _load_for_review(set_id)
+    data = request.get_json(silent=True) or {}
+    require_fields(data, "reason")
+    reason = str(data["reason"]).strip()
+    if not reason:
+        raise ApiError("Write what needs correcting.", 422, "validation_error", {"field": "reason"})
+    user = current_user()
+
+    returned = [r for r in record.reports if r.status is ReportStatus.SUBMITTED]
+    for report in returned:
+        send_back(report, user, reason)
+    # The combined documents describe the version that was returned.
+    record.pdf_path = None
+    db.session.commit()
+
+    return {"set": record.to_dict(), "message": f"{record.set_number} returned to the inspector."}
 
 
 # -------------------------------------------------------------------- helpers

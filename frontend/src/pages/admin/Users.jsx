@@ -1,9 +1,10 @@
 import { useState } from 'react'
 
-import { clientApi, userApi } from '../../api/endpoints'
+import { userApi } from '../../api/endpoints'
 import { errorMessage } from '../../api/client'
 import { useApi, useDebounced } from '../../hooks/useApi'
 import PageHeader from '../../components/PageHeader'
+import ClientSelect from '../../components/ClientSelect'
 import Spinner from '../../components/Spinner'
 import { useToast } from '../../components/Toast'
 import { Checkbox, Empty, Modal, Pager, Pill, Select, TextInput, formatDateTime } from '../../components/ui'
@@ -24,7 +25,6 @@ export default function Users() {
     () => userApi.list({ page, per_page: 25, search: debounced || undefined, role: role || undefined }),
     [page, debounced, role],
   )
-  const clients = useApi(() => clientApi.list({ per_page: 200 }), [])
   const roles = useApi(() => userApi.roles(), [])
 
   const save = async (payload) => {
@@ -168,7 +168,6 @@ export default function Users() {
       <UserModal
         open={Boolean(editing)}
         user={editing?.id ? editing : null}
-        clients={clients.data?.items || []}
         roles={roles.data?.roles || []}
         onClose={() => setEditing(null)}
         onSave={save}
@@ -201,7 +200,7 @@ export default function Users() {
   )
 }
 
-function UserModal({ open, user, clients, roles, onClose, onSave }) {
+function UserModal({ open, user, roles, onClose, onSave }) {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [openedFor, setOpenedFor] = useState(null)
@@ -255,12 +254,12 @@ function UserModal({ open, user, clients, roles, onClose, onSave }) {
           onChange={set('role')}
           options={roles.map((r) => ({ value: r.value, label: r.label }))}
         />
-        <Select
+        <ClientSelect
           label="Client"
           placeholder="Not linked to a client"
+          allowRequest={false}
           value={form.client_id || ''}
-          onChange={set('client_id')}
-          options={clients.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` }))}
+          onChange={(id) => setForm((f) => ({ ...f, client_id: id }))}
           hint="Required for client users — they only see this client's records."
           error={form.role === 'client' && !form.client_id ? 'A client user must be linked to a client.' : undefined}
         />

@@ -95,6 +95,12 @@ def run_seed():
     _seed_equipment_types()
 
     db.session.commit()
+
+    # The approved-client master list. Skips anything already loaded.
+    from services.client_import import import_clients
+
+    result = import_clients()
+    print(f"  Clients: imported {result['imported']}, already present {result['skipped']}")
     _report()
 
 

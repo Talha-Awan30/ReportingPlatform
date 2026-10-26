@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { clientApi, inspectionSetApi, jobApi, moduleApi } from '../api/endpoints'
+import { inspectionSetApi, jobApi, moduleApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { useToast } from '../components/Toast'
 import { DynamicFieldGrid, seedDefaults } from '../components/DynamicFields'
-import { Empty, Select, TextInput } from '../components/ui'
+import ClientSelect from '../components/ClientSelect'
+import { Empty, TextInput } from '../components/ui'
 
 /**
  * Starting an inspection.
@@ -24,15 +25,22 @@ export default function NewInspection() {
   const toast = useToast()
 
   const schema = useApi(() => moduleApi.formSchema(slug), [slug])
-  const clients = useApi(() => clientApi.list({ per_page: 200, active_only: 'true' }), [])
 
   const [step, setStep] = useState(1)
   const [clientId, setClientId] = useState('')
-  const [jobId, setJobId] = useState('')
+  // The picked client itself, for prefilling the title page.
+  const [client, setClient] = useState(null)
+  // The job is typed. A number matching one of this client's jobs uses that
+  // job; anything else becomes a new job for the client when the set is created.
+  const [jobText, setJobText] = useState('')
+  const [createdJob, setCreatedJob] = useState(null)
   const [unitCount, setUnitCount] = useState(1)
   const [titlePage, setTitlePage] = useState({})
   const [saving, setSaving] = useState(false)
   const [missing, setMissing] = useState(new Set())
+  // slot key -> File. Held here because uploads need a set id, which only
+  // exists once the set is created on the last step.
+  const [files, setFiles] = useState({})
 
   const jobs = useApi(
     () => (clientId ? jobApi.list({ client_id: clientId, per_page: 200 }) : Promise.resolve({ items: [] })),
@@ -45,24 +53,30 @@ export default function NewInspection() {
 
   const module = schema.data.module
   const options = schema.data.options || {}
+  const enforceRequired = schema.data.enforce_required ?? true
   const multi = module.supports_multiple
 
   // A module with no title page keeps the old single-report flow.
   if (!module.has_title_page) {
-    return <SingleReportStart module={module} clients={clients.data?.items || []} />
+    return <SingleReportStart module={module} />
   }
+
+  const typedJob = jobText.trim()
+  const matchedJob =
+    [...(jobs.data?.items || []), ...(createdJob ? [createdJob] : [])].find(
+      (j) => j.job_number.toLowerCase() === typedJob.toLowerCase(),
+    ) || null
 
   const setField = (key, patch) =>
     setTitlePage((current) => ({ ...current, [key]: { ...(current[key] || {}), ...patch } }))
 
   const goToTitlePage = () => {
-    if (!jobId) {
-      toast.error('Pick the job this visit belongs to.')
+    if (!clientId || !typedJob) {
+      toast.error('Enter the job this visit belongs to.')
       return
     }
     // Prefill from the client and job so nothing is typed twice.
-    const client = clients.data?.items?.find((c) => String(c.id) === String(clientId))
-    const job = jobs.data?.items?.find((j) => String(j.id) === String(jobId))
+    const job = matchedJob
     setTitlePage((current) =>
       seedDefaults(module.title_page, {
         client: { value: client?.name || '' },
@@ -78,7 +92,7 @@ export default function NewInspection() {
     const blanks = module.title_page
       .filter((f) => f.required && !titlePage[f.key]?.value)
       .map((f) => f.key)
-    if (blanks.length) {
+    if (blanks.length && enforceRequired) {
       setMissing(new Set(blanks))
       toast.error(`${blanks.length} required field(s) on the title page are still blank.`)
       return
@@ -86,18 +100,38 @@ export default function NewInspection() {
 
     setSaving(true)
     try {
+      let job = matchedJob
+      if (!job) {
+        // A new job number - register it under the client first.
+        ;({ job } = await jobApi.create({ client_id: Number(clientId), job_number: typedJob }))
+        setCreatedJob(job)
+      }
       const { set } = await inspectionSetApi.create({
         module_slug: slug,
-        job_id: Number(jobId),
+        job_id: job.id,
         unit_count: Number(unitCount),
         title_page: titlePage,
       })
+      // Now the set exists, push the pictures chosen on this screen.
+      const chosen = Object.entries(files).filter(([, file]) => file)
+      for (const [slotKey, file] of chosen) {
+        try {
+          await inspectionSetApi.uploadPhotos(set.id, [file], slotKey)
+        } catch (err) {
+          toast.error(`${slotKey}: ${errorMessage(err)}`)
+        }
+      }
+
       toast.success(
         `${set.set_number} created — ${set.reports.length} ${
           set.reports.length === 1 ? module.unit_noun : module.unit_noun_plural
         } ready to fill in.`,
       )
-      navigate(`/inspection-sets/${set.id}`)
+
+      // Straight into the first unit; the set page is reachable from its
+      // breadcrumb but is not a step in the flow.
+      const first = [...set.reports].sort((a, b) => a.sequence - b.sequence)[0]
+      navigate(first ? `/reports/${first.id}` : `/inspection-sets/${set.id}`)
     } catch (err) {
       toast.error(errorMessage(err))
       setSaving(false)
@@ -143,36 +177,25 @@ export default function NewInspection() {
           </div>
 
           <div className="field-grid">
-            <Select
+            <ClientSelect
               label="Client"
               required
-              placeholder="Select a client…"
               value={clientId}
-              onChange={(e) => {
-                setClientId(e.target.value)
-                setJobId('')
+              onChange={(id, picked) => {
+                setClientId(id)
+                setClient(picked)
+                setJobText('')
+                setCreatedJob(null)
               }}
-              options={(clients.data?.items || []).map((c) => ({
-                value: c.id,
-                label: `${c.code} — ${c.name}`,
-              }))}
             />
-            <Select
+            <TextInput
               label="Job"
               required
               disabled={!clientId}
-              placeholder={clientId ? 'Select a job…' : 'Pick a client first'}
-              value={jobId}
-              onChange={(e) => setJobId(e.target.value)}
-              options={(jobs.data?.items || []).map((j) => ({
-                value: j.id,
-                label: `${j.job_number} — ${j.site_name || 'No site'}`,
-              }))}
-              hint={
-                clientId && !jobs.loading && !jobs.data?.items?.length
-                  ? 'This client has no jobs yet — create one under Registers → Jobs.'
-                  : undefined
-              }
+              placeholder={clientId ? 'Job number' : 'Pick a client first'}
+              value={jobText}
+              onChange={(e) => setJobText(e.target.value)}
+              autoComplete="off"
             />
             {multi && (
               <TextInput
@@ -183,13 +206,12 @@ export default function NewInspection() {
                 required
                 value={unitCount}
                 onChange={(e) => setUnitCount(e.target.value)}
-                hint={`Between 1 and ${module.max_units}. One report is created for each.`}
               />
             )}
           </div>
 
           <div className="form-actions" style={{ marginTop: '1.5rem' }}>
-            <button type="button" className="btn btn-cta" onClick={goToTitlePage} disabled={!jobId}>
+            <button type="button" className="btn btn-cta" onClick={goToTitlePage} disabled={!clientId || !typedJob}>
               Continue to the title page <i className="fas fa-arrow-right" />
             </button>
           </div>
@@ -213,41 +235,127 @@ export default function NewInspection() {
               fields={module.title_page}
               values={titlePage}
               options={options}
+              showRequired={enforceRequired}
               missingKeys={missing}
               onChange={setField}
             />
           </div>
 
-          <div className="section-card">
-            <div className="card-head">
-              <div>
-                <h2><i className="fas fa-image" /> Cover photographs</h2>
-                <p className="card-sub">
-                  Uploaded after the set is created — you will land straight on the upload panel.
-                </p>
+          {module.title_page_photos.length > 0 && (
+            <div className="section-card">
+              <div className="card-head">
+                <div>
+                  <h2><i className="fas fa-image" /> Cover photographs</h2>
+                  <p className="card-sub">
+                    Placed on the title page. Shared by every {module.unit_noun} on this visit.
+                  </p>
+                </div>
+              </div>
+              <div className="photo-grid">
+                {module.title_page_photos.map((slot) => (
+                  <PickPhoto
+                    key={slot.key}
+                    slot={slot}
+                    file={files[slot.key]}
+                    onPick={(file) => setFiles((f) => ({ ...f, [slot.key]: file }))}
+                  />
+                ))}
               </div>
             </div>
-            <p className="muted" style={{ fontSize: '0.85rem' }}>
-              {module.title_page_photos.map((p) => p.label).join(' · ')}
-            </p>
-          </div>
+          )}
 
           <div className="form-actions">
             <button type="button" className="btn btn-outline" onClick={() => setStep(1)}>
               <i className="fas fa-arrow-left" /> Back
             </button>
             <button type="button" className="btn btn-cta" onClick={create} disabled={saving}>
-              <i className={`fas ${saving ? 'fa-circle-notch fa-spin' : 'fa-check'}`} />{' '}
-              {saving
-                ? 'Creating…'
-                : `Create ${unitCount} ${
-                    Number(unitCount) === 1 ? module.unit_noun : module.unit_noun_plural
-                  }`}
+              <i className={`fas ${saving ? 'fa-circle-notch fa-spin' : 'fa-play'}`} />{' '}
+              {saving ? 'Creating…' : `Start inspection of ${module.unit_noun} 1`}
             </button>
           </div>
         </>
       )}
     </>
+  )
+}
+
+/**
+ * One cover-photo slot on the wizard. The file is only held in the browser
+ * until the set is created, so a preview comes from an object URL.
+ */
+function PickPhoto({ slot, file, onPick }) {
+  const inputRef = useRef(null)
+  const [preview, setPreview] = useState(null)
+
+  useEffect(() => {
+    if (!file) {
+      setPreview(null)
+      return undefined
+    }
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  return (
+    <figure className="photo-tile">
+      {preview ? (
+        <img src={preview} alt={slot.label} style={{ width: '100%', height: 130, objectFit: 'cover' }} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          style={{
+            width: '100%',
+            height: 130,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            background: 'var(--bg-secondary)',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--text-muted)',
+            fontFamily: 'inherit',
+            fontSize: '0.75rem',
+          }}
+        >
+          <i className="fas fa-camera" style={{ fontSize: '1.4rem' }} />
+          Choose image
+        </button>
+      )}
+      <figcaption className="photo-meta">
+        <span title={slot.help_text || slot.label}>{slot.label}</span>
+        <span style={{ display: 'flex', gap: '0.35rem' }}>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*,.jfif,.jpe,.pjpeg,.pjp,.tif,.tiff,.bmp,.webp"
+            style={{ display: 'none' }}
+            onChange={(e) => onPick(e.target.files?.[0] || null)}
+          />
+          <button
+            type="button"
+            className="toast-close"
+            onClick={() => inputRef.current?.click()}
+            aria-label={`Choose ${slot.label}`}
+          >
+            <i className="fas fa-upload" />
+          </button>
+          {file && (
+            <button
+              type="button"
+              className="toast-close"
+              onClick={() => onPick(null)}
+              aria-label={`Remove ${slot.label}`}
+            >
+              <i className="fas fa-trash" />
+            </button>
+          )}
+        </span>
+      </figcaption>
+    </figure>
   )
 }
 

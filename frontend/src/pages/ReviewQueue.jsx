@@ -1,20 +1,25 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 
 import { moduleApi, reportApi } from '../api/endpoints'
 import { useApi } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
+import ReviewDialog from '../components/ReviewDialog'
 import Spinner from '../components/Spinner'
-import { Empty, Pager, Pill, formatDate, formatDateTime } from '../components/ui'
+import { Empty, Pager, Pill, formatDateTime } from '../components/ui'
 
-/** Every submitted report waiting for review, oldest first. */
+/**
+ * What is waiting for a reviewer, latest submission first. A multi-unit visit
+ * is one row - its complete report - once every unit is in. Opening a row
+ * shows a pop-up to view, download, approve or return it.
+ */
 export default function ReviewQueue() {
   const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState(null)
   const [moduleSlug, setModuleSlug] = useState('')
 
   const modules = useApi(() => moduleApi.list(), [])
   const queue = useApi(
-    () => reportApi.queue({ page, per_page: 25, module_slug: moduleSlug || undefined }),
+    () => reportApi.reviewQueue({ page, per_page: 25, module_slug: moduleSlug || undefined }),
     [page, moduleSlug],
   )
 
@@ -28,7 +33,7 @@ export default function ReviewQueue() {
       <PageHeader
         icon="fa-clipboard-list"
         title="Review Queue"
-        subtitle="Reports submitted from site, waiting on your decision."
+        subtitle="Completed reports from site, latest first. Click one to view it and decide."
         crumbs={[{ label: 'Review Queue' }]}
       />
 
@@ -67,8 +72,7 @@ export default function ReviewQueue() {
                 <thead>
                   <tr>
                     <th>Report</th>
-                    <th>Item</th>
-                    <th>Equipment</th>
+                    <th>Inspection</th>
                     <th>Client / Job</th>
                     <th>Inspector</th>
                     <th>Submitted</th>
@@ -76,25 +80,30 @@ export default function ReviewQueue() {
                   </tr>
                 </thead>
                 <tbody>
-                  {queue.data.items.map((report) => {
-                    const days = waitingDays(report.submitted_at)
+                  {queue.data.items.map((item) => {
+                    const days = waitingDays(item.submitted_at)
                     return (
-                      <tr key={report.id}>
+                      <tr key={`${item.kind}-${item.id}`} className="review-row" onClick={() => setSelected(item)}>
                         <td>
-                          <Link to={`/reports/${report.id}`} className="cell-strong">
-                            {report.report_number}
-                          </Link>
-                          <div className="cell-sub">Rev {report.revision}</div>
+                          <span className="cell-strong">{item.number}</span>
+                          <div className="cell-sub">
+                            {item.kind === 'set'
+                              ? `${item.unit_count} ${item.unit_count === 1 ? item.unit_noun : item.unit_noun_plural}`
+                              : item.equipment_tag || 'Single report'}
+                            {` · Rev ${item.revision}`}
+                          </div>
                         </td>
-                        <td className="cell-sub">{report.equipment_type}</td>
-                        <td>{report.equipment_tag}</td>
                         <td>
-                          <div>{report.client_name}</div>
-                          <div className="cell-sub">{report.job_number}</div>
+                          <div>{item.module_name}</div>
+                          {item.item && <div className="cell-sub">{item.item}</div>}
                         </td>
-                        <td>{report.inspector_name}</td>
+                        <td>
+                          <div>{item.client_name}</div>
+                          <div className="cell-sub">{item.job_number}</div>
+                        </td>
+                        <td>{item.inspector_name}</td>
                         <td className="nowrap">
-                          <div>{formatDateTime(report.submitted_at)}</div>
+                          <div>{formatDateTime(item.submitted_at)}</div>
                           {days != null && (
                             <div className="cell-sub">
                               <Pill tone={days > 3 ? 'danger' : days > 1 ? 'warning' : 'neutral'}>
@@ -104,9 +113,16 @@ export default function ReviewQueue() {
                           )}
                         </td>
                         <td className="text-right">
-                          <Link to={`/reports/${report.id}`} className="btn btn-primary btn-sm">
-                            Open
-                          </Link>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelected(item)
+                            }}
+                          >
+                            <i className="fas fa-eye" /> Review
+                          </button>
                         </td>
                       </tr>
                     )
@@ -122,6 +138,14 @@ export default function ReviewQueue() {
           </Empty>
         )}
       </div>
+      <ReviewDialog
+        item={selected}
+        onClose={() => setSelected(null)}
+        onDone={() => {
+          setSelected(null)
+          queue.reload({ silent: true })
+        }}
+      />
     </>
   )
 }

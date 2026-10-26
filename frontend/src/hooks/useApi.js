@@ -22,9 +22,12 @@ export function useApi(loader, deps = [], { immediate = true } = {}) {
     }
   }, [])
 
-  const run = useCallback(async () => {
+  const run = useCallback(async ({ silent = false } = {}) => {
     const id = ++requestId.current
-    setLoading(true)
+    // A silent refresh leaves `loading` alone, so the page keeps its current
+    // markup - and therefore its scroll position - instead of being replaced by
+    // a spinner and re-mounted at the top.
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const result = await loader()
@@ -34,7 +37,7 @@ export function useApi(loader, deps = [], { immediate = true } = {}) {
       if (mounted.current && id === requestId.current) setError(errorMessage(err))
       return null
     } finally {
-      if (mounted.current && id === requestId.current) setLoading(false)
+      if (!silent && mounted.current && id === requestId.current) setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)

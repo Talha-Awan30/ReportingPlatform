@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { clientApi, jobApi, userApi } from '../api/endpoints'
+import { jobApi, userApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi, useDebounced } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
+import ClientSelect from '../components/ClientSelect'
 import Spinner from '../components/Spinner'
 import { useToast } from '../components/Toast'
 import { Empty, Modal, Pager, Pill, Select, TextArea, TextInput, formatDate } from '../components/ui'
@@ -28,7 +29,6 @@ export default function Jobs() {
   const clientId = params.get('client_id') || ''
   const status = params.get('status') || ''
 
-  const clients = useApi(() => clientApi.list({ per_page: 200 }), [])
   const jobs = useApi(
     () =>
       jobApi.list({
@@ -88,12 +88,7 @@ export default function Jobs() {
               }}
             />
           </div>
-          <select value={clientId} onChange={(e) => setFilter('client_id', e.target.value)}>
-            <option value="">All clients</option>
-            {(clients.data?.items || []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <ClientSelect variant="filter" value={clientId} onChange={(id) => setFilter('client_id', id)} />
           <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">All statuses</option>
             <option value="open">Open</option>
@@ -153,7 +148,6 @@ export default function Jobs() {
 
       <JobModal
         open={creating}
-        clients={clients.data?.items || []}
         onClose={() => setCreating(false)}
         onSave={create}
       />
@@ -161,7 +155,7 @@ export default function Jobs() {
   )
 }
 
-export function JobModal({ open, job, clients = [], onClose, onSave }) {
+export function JobModal({ open, job, onClose, onSave }) {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [openedFor, setOpenedFor] = useState(null)
@@ -218,14 +212,12 @@ export function JobModal({ open, job, clients = [], onClose, onSave }) {
           disabled={Boolean(job)}
           hint={job ? undefined : 'Assigned automatically — override only if the job already has a number.'}
         />
-        <Select
+        <ClientSelect
           label="Client"
           required
-          placeholder="Select a client…"
           value={form.client_id || ''}
-          onChange={set('client_id')}
+          onChange={(id) => setForm((f) => ({ ...f, client_id: id }))}
           disabled={Boolean(job)}
-          options={clients.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` }))}
         />
         <TextInput label="Site name" value={form.site_name || ''} onChange={set('site_name')} />
         <TextInput label="Purchase order" value={form.purchase_order || ''} onChange={set('purchase_order')} />

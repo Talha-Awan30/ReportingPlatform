@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { clientApi, jobApi } from '../api/endpoints'
+import { jobApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
@@ -23,7 +23,6 @@ export default function JobDetail() {
   const [editing, setEditing] = useState(false)
 
   const job = useApi(() => jobApi.get(id), [id])
-  const clients = useApi(() => clientApi.list({ per_page: 200 }), [])
 
   if (job.loading) return <Spinner full label="Loading job" />
   if (job.error) return <Empty icon="fa-triangle-exclamation" title="Could not load this job">{job.error}</Empty>
@@ -129,7 +128,6 @@ export default function JobDetail() {
       <JobModal
         open={editing}
         job={data}
-        clients={clients.data?.items || []}
         onClose={() => setEditing(false)}
         onSave={save}
       />

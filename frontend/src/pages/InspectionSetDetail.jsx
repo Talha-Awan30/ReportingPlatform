@@ -9,7 +9,8 @@ import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { useToast } from '../components/Toast'
 import { DynamicFieldGrid } from '../components/DynamicFields'
-import { Empty, Pill, StatusPill, formatDate } from '../components/ui'
+import AuthedImage from '../components/AuthedImage'
+import { Empty, formatDate } from '../components/ui'
 
 /**
  * One visit: the shared title page and its cover photographs, then the list of
@@ -28,6 +29,7 @@ export default function InspectionSetDetail() {
   const [titlePage, setTitlePage] = useState({})
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
   const loaded = useRef(null)
 
   useEffect(() => {
@@ -39,6 +41,24 @@ export default function InspectionSetDetail() {
     setTitlePage(data.title_page || {})
     setDirty(false)
   }, [record.data])
+
+  // The title page saves itself a moment after typing stops, so there is no
+  // button to forget. The record is not reloaded, which would fight the cursor.
+  useEffect(() => {
+    if (!dirty) return undefined
+    const timer = setTimeout(async () => {
+      setSaving(true)
+      try {
+        await inspectionSetApi.update(id, { title_page: titlePage })
+        setDirty(false)
+      } catch (err) {
+        toast.error(errorMessage(err))
+      } finally {
+        setSaving(false)
+      }
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [dirty, titlePage, id, toast])
 
   if (record.loading) return <Spinner full label="Loading inspection set" />
   if (record.error) {
@@ -55,38 +75,24 @@ export default function InspectionSetDetail() {
     setDirty(true)
   }
 
-  const saveTitlePage = async () => {
-    setSaving(true)
+
+  /**
+   * Rebuild the combined document from the current answers, then download it.
+   * Always regenerates so a lift edited since the last build is included.
+   */
+  const buildAndDownload = async () => {
+    setBusy(true)
     try {
-      await inspectionSetApi.update(id, { title_page: titlePage })
-      toast.success('Title page saved.')
-      setDirty(false)
-      record.reload()
+      const result = await inspectionSetApi.generate(id, true)
+      await downloadFile(
+        inspectionSetApi.downloadUrl(id),
+        result.set?.docx_path || `${data.set_number}.docx`,
+      )
+      record.reload({ silent: true })
     } catch (err) {
-      toast.error(errorMessage(err))
+      toast.error(errorMessage(err, 'The combined report could not be built.'))
     } finally {
-      setSaving(false)
-    }
-  }
-
-  const addUnit = async () => {
-    try {
-      const result = await inspectionSetApi.addUnit(id)
-      toast.success(`${module?.unit_noun || 'Unit'} added.`)
-      record.reload()
-      navigate(`/reports/${result.report.id}`)
-    } catch (err) {
-      toast.error(errorMessage(err))
-    }
-  }
-
-  const generate = async () => {
-    try {
-      const result = await inspectionSetApi.generate(id)
-      toast.success(result.message)
-      record.reload()
-    } catch (err) {
-      toast.error(errorMessage(err))
+      setBusy(false)
     }
   }
 
@@ -111,7 +117,8 @@ export default function InspectionSetDetail() {
 
   const noun = module?.unit_noun || 'unit'
   const nounPlural = module?.unit_noun_plural || 'units'
-  const nextDraft = data.reports.find((r) => r.status === 'draft')
+  // The next unit still needing work - a draft, or one returned for correction.
+  const nextDraft = data.reports.find((r) => r.is_editable)
 
   return (
     <>
@@ -124,25 +131,6 @@ export default function InspectionSetDetail() {
           ...(module ? [{ label: module.name, to: `/modules/${slug}` }] : []),
           { label: data.set_number },
         ]}
-        actions={
-          <>
-            {data.docx_path && (
-              <button type="button" className="btn btn-outline" onClick={download}>
-                <i className="fas fa-file-word" /> Download combined report
-              </button>
-            )}
-            {!isClient && (
-              <button type="button" className="btn btn-primary" onClick={generate}>
-                <i className="fas fa-file-export" /> Generate combined report
-              </button>
-            )}
-            {nextDraft && (
-              <Link to={`/reports/${nextDraft.id}`} className="btn btn-cta">
-                <i className="fas fa-pen" /> Continue {noun} #{nextDraft.sequence}
-              </Link>
-            )}
-          </>
-        }
       />
 
       {/* ------------------------------------------------------- progress */}
@@ -188,14 +176,9 @@ export default function InspectionSetDetail() {
             </p>
           </div>
           {editable && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={saveTitlePage}
-              disabled={saving || !dirty}
-            >
-              <i className="fas fa-floppy-disk" /> {saving ? 'Saving…' : 'Save title page'}
-            </button>
+            <span className="card-sub" aria-live="polite">
+              {saving ? 'Saving…' : dirty ? 'Unsaved changes…' : 'All changes saved'}
+            </span>
           )}
         </div>
 
@@ -229,68 +212,36 @@ export default function InspectionSetDetail() {
                 slot={slot}
                 photos={(data.photos || []).filter((p) => p.slot_key === slot.key)}
                 editable={editable}
-                onChanged={record.reload}
+                onChanged={() => record.reload({ silent: true })}
               />
             ))}
           </div>
         </div>
       )}
 
-      {/* -------------------------------------------------------- units */}
-      <div className="section-card">
-        <div className="card-head">
-          <div>
-            <h2>
-              <i className="fas fa-list-ol" /> {nounPlural.charAt(0).toUpperCase() + nounPlural.slice(1)}
-            </h2>
-            <p className="card-sub">
-              Each one gets the same particulars table, check-list and photographic presentation.
-            </p>
-          </div>
-          {editable && (
-            <button type="button" className="btn btn-outline btn-sm" onClick={addUnit}>
-              <i className="fas fa-plus" /> Add another {noun}
+      <div className="form-footer">
+        <span className="footer-note">
+          {data.progress.completed} of {data.progress.total} {nounPlural} submitted.
+        </span>
+        {nextDraft ? (
+          <Link to={`/reports/${nextDraft.id}`} className="btn btn-cta btn-lg">
+            <i className="fas fa-play" /> Start inspection of {noun} #{nextDraft.sequence}
+          </Link>
+        ) : (
+          // Staff rebuild it from the latest answers; a client downloads the
+          // released file, since generating is a staff action.
+          (!isClient || data.docx_path) && (
+            <button
+              type="button"
+              className="btn btn-cta btn-lg"
+              onClick={isClient ? download : buildAndDownload}
+              disabled={busy}
+            >
+              <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-file-word'}`} />{' '}
+              {busy ? 'Building…' : 'Download report'}
             </button>
-          )}
-        </div>
-
-        <div className="table-container">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Report</th>
-                <th>Identification</th>
-                <th>Status</th>
-                <th>Inspected</th>
-                <th className="text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.reports.map((report) => (
-                <tr key={report.id}>
-                  <td><Pill tone="neutral">{report.sequence}</Pill></td>
-                  <td>
-                    <Link to={`/reports/${report.id}`} className="cell-strong">
-                      {report.report_number}
-                    </Link>
-                  </td>
-                  <td>{report.equipment_tag || <span className="muted">Not filled in yet</span>}</td>
-                  <td><StatusPill label={report.status_label} severity={report.status_severity} /></td>
-                  <td className="nowrap">{formatDate(report.inspection_date)}</td>
-                  <td className="text-right">
-                    <Link
-                      to={`/reports/${report.id}`}
-                      className={`btn btn-sm ${report.is_editable ? 'btn-cta' : 'btn-outline'}`}
-                    >
-                      {report.is_editable ? 'Fill in' : 'Open'}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          )
+        )}
       </div>
 
       {!isClient && data.reports.every((r) => r.status === 'draft') && (
@@ -346,7 +297,7 @@ function SetPhotoSlot({ setId, slot, photos, editable, onChanged }) {
   return (
     <figure className="photo-tile">
       {first ? (
-        <img src={first.url} alt={slot.label} loading="lazy" />
+        <AuthedImage src={first.url} alt={slot.label} style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }} />
       ) : (
         <div
           style={{
@@ -371,7 +322,7 @@ function SetPhotoSlot({ setId, slot, photos, editable, onChanged }) {
             <input
               ref={inputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.jfif,.jpe,.pjpeg,.pjp,.tif,.tiff,.bmp,.webp"
               style={{ display: 'none' }}
               onChange={upload}
             />

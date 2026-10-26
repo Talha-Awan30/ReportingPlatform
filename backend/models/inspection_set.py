@@ -33,6 +33,8 @@ class InspectionSet(BaseModel):
 
     # The combined document: title page followed by every unit's report.
     docx_path = db.Column(db.String(500))
+    # The same document as a PDF, for the reviewer's in-browser preview.
+    pdf_path = db.Column(db.String(500))
     generated_at = db.Column(db.DateTime)
 
     job = db.relationship("Job")

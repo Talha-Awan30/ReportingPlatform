@@ -68,9 +68,11 @@ def main():
     check("photo slots are optional", all(not s["required"] for s in module["photo_slots"]))
     check("QR is an upload, not a text box", "qr_code" not in [f["key"] for f in module["title_page"]])
 
-    customer = client.post(
-        "/api/clients", headers=auth, json={"code": f"RG{os.getpid()}", "name": "IITC"}
-    ).json["client"]
+    # Creating a client per run would litter the approved list (names are
+    # unique, and new clients need an admin's SBU). Use a retired placeholder
+    # client so the test jobs never land on a real company.
+    directory = client.get("/api/clients/directory", headers=auth).json["clients"]
+    customer = next((c for c in directory if not c["is_active"]), directory[0])
     job = client.post(
         "/api/jobs",
         headers=auth,
@@ -135,13 +137,30 @@ def main():
             )
         else:
             check(
-                "the last submit builds the combined report",
-                "ready to download" in result.json["message"],
+                "the last submit sends the combined report to review",
+                "gone to the reviewer" in result.json["message"],
                 result.json["message"],
             )
 
     record = client.get(f"/api/inspection-sets/{set_id}", headers=auth).json["set"]
     check("set has a generated document", bool(record["docx_path"]), str(record["docx_path"]))
+
+    # The reviewer's preview: the whole visit as one PDF, if a converter exists.
+    from services.pdf_converter import engine
+
+    with app.app_context():
+        converter = engine()
+    if converter:
+        pdf = client.get(f"/api/inspection-sets/{set_id}/pdf", headers=auth)
+        check("the visit has a PDF preview", pdf.status_code == 200 and pdf.data[:4] == b"%PDF",
+              f"{pdf.status_code} via {converter[0]}")
+        check("the PDF stays small", len(pdf.data) < 5 * 1024 * 1024, f"{len(pdf.data) // 1024} KB")
+    else:
+        print("SKIP  no PDF converter installed - preview not tested")
+    queue = client.get("/api/reports/review-queue", headers=auth).json["items"]
+    check("the visit waits in the review queue as one item",
+          sum(1 for i in queue if i["kind"] == "set" and i["id"] == set_id) == 1
+          and not any(i["kind"] == "report" and i["id"] in [l["id"] for l in lifts] for i in queue))
 
     # ------------------------------------------------------- read it back
     document = Document(os.path.join(GENERATED, record["docx_path"]))

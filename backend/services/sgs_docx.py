@@ -120,37 +120,13 @@ def replace_in_paragraph(paragraph, mapping):
 
 
 def _image_stream(path, aspect=None):
-    """Any uploaded picture as a JPEG/PNG stream Word can embed.
+    """Any uploaded picture as a compressed JPEG/PNG stream Word can embed.
 
-    Applies the EXIF rotation phone cameras rely on. With `aspect`
-    (width / height) the picture is centre-cropped to exactly that shape, so it
-    fills its box without being stretched or leaving gaps.
+    With `aspect` (width / height) it is centre-cropped to exactly that shape.
     """
-    import io
+    from services.image_compress import compressed_stream
 
-    from PIL import Image, ImageOps
-
-    image = Image.open(path)
-    rotated = image.getexif().get(0x0112, 1) not in (0, 1)  # EXIF Orientation
-    if not aspect and not rotated and image.format in ("JPEG", "PNG"):
-        # Already embeddable as it is - keep the original bytes untouched.
-        with open(path, "rb") as handle:
-            return io.BytesIO(handle.read())
-
-    if rotated:
-        image = ImageOps.exif_transpose(image)
-    if aspect:
-        width = min(image.width, 1600)
-        image = ImageOps.fit(image, (width, max(1, round(width / aspect))), Image.LANCZOS)
-
-    stream = io.BytesIO()
-    transparent = image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info)
-    if transparent:
-        image.convert("RGBA").save(stream, "PNG")
-    else:
-        image.convert("RGB").save(stream, "JPEG", quality=88)
-    stream.seek(0)
-    return stream
+    return compressed_stream(path, aspect=aspect)
 
 
 def add_image_to_cell(cell, path, width_mm=75):

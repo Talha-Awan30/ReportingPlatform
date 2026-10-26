@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { clientApi, equipmentApi, jobApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { forgetSbuSubSectorMap, refreshClientDirectory } from '../hooks/useClientDirectory'
 import { ROLES, useAuth } from '../auth/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
@@ -43,6 +44,8 @@ export default function ClientDetail() {
       toast.success('Client updated.')
       setEditing(false)
       client.reload()
+      refreshClientDirectory()
+      forgetSbuSubSectorMap()
     } catch (err) {
       toast.error(errorMessage(err))
     }
@@ -117,6 +120,8 @@ export default function ClientDetail() {
         </div>
         <div className="detail-grid">
           <Detail k="Client code" v={data.code} />
+          <Detail k="SBU" v={data.sbu} />
+          <Detail k="Sub sector" v={data.sub_sector} />
           <Detail k="Industry" v={data.industry} />
           <Detail k="City" v={data.city} />
           <Detail k="Country" v={data.country} />

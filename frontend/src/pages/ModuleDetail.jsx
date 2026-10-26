@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { clientApi, equipmentApi, jobApi, moduleApi, reportApi } from '../api/endpoints'
+import { equipmentApi, jobApi, moduleApi, reportApi } from '../api/endpoints'
 import { errorMessage } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import PageHeader from '../components/PageHeader'
+import ClientSelect from '../components/ClientSelect'
 import Spinner from '../components/Spinner'
 import { useToast } from '../components/Toast'
 import { Empty, Field, Modal, Pill, Select, StatusPill, formatDate } from '../components/ui'
@@ -202,7 +203,6 @@ function StartInspectionModal({ open, module, onClose }) {
   const [equipmentId, setEquipmentId] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const clients = useApi(() => (open ? clientApi.list({ per_page: 200, active_only: 'true' }) : null), [open])
   const jobs = useApi(
     () => (clientId ? jobApi.list({ client_id: clientId, per_page: 200 }) : Promise.resolve({ items: [] })),
     [clientId],
@@ -254,17 +254,15 @@ function StartInspectionModal({ open, module, onClose }) {
       }
     >
       <form id="start-inspection" onSubmit={submit} className="field-grid single">
-        <Select
+        <ClientSelect
           label="Client"
           required
-          placeholder="Select a client…"
           value={clientId}
-          onChange={(e) => {
-            setClientId(e.target.value)
+          onChange={(id) => {
+            setClientId(id)
             setJobId('')
             setEquipmentId('')
           }}
-          options={(clients.data?.items || []).map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` }))}
         />
 
         <Select
