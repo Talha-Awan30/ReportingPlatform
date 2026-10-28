@@ -164,12 +164,20 @@ export default function ReportDetail() {
     if (dirty && !(await save({ silent: true }))) return
     setMissing([])
     try {
-      // A unit of a visit submits the whole visit - every lift in one go.
-      const result = data.inspection_set_id
-        ? await inspectionSetApi.submit(data.inspection_set_id)
-        : await reportApi.submit(id)
+      if (correctingVisit) {
+        // Corrections after a return go back to the reviewer together.
+        const result = await inspectionSetApi.submit(data.inspection_set_id)
+        toast.success(result.message)
+        report.reload()
+        return
+      }
+      // While the report is being made, one unit at a time: submit this one
+      // and carry straight on to the next, or back to the visit at the end.
+      const result = await reportApi.submit(id)
       toast.success(result.message)
-      report.reload()
+      if (nextUnit) navigate(`/reports/${nextUnit.id}`)
+      else if (data.inspection_set_id) navigate(`/inspection-sets/${data.inspection_set_id}`)
+      else report.reload()
     } catch (err) {
       const details = errorDetails(err)
       const mine = (details.units || []).find((u) => u.id === data.id)
@@ -234,6 +242,10 @@ export default function ReportDetail() {
   const slotsFilled = (module?.photo_slots || []).filter((s) => filledSlots.has(s.key)).length
 
   const units = data.set_units || []
+  // A visit sent back by the reviewer is corrected and resubmitted as a whole;
+  // while it is first being made, the inspector works through it unit by unit.
+  const correctingVisit = Boolean(data.inspection_set_id) && units.some((u) => u.status === 'returned')
+  const nextUnit = units.find((u) => u.sequence > data.sequence && u.is_editable)
 
   // A past revision is shown read-only, with the answers it was submitted with.
   const revisionRows = revisionList.data?.revisions || []
@@ -679,9 +691,18 @@ export default function ReportDetail() {
             onClick={submit}
             disabled={saving}
           >
-            {units.length > 1 ? (
+            {correctingVisit ? (
               <>
-                <i className="fas fa-paper-plane" /> Submit inspection ({units.length} {module?.unit_noun_plural || 'units'})
+                <i className="fas fa-paper-plane" /> Resubmit inspection ({units.length}{' '}
+                {units.length === 1 ? unitNoun : module?.unit_noun_plural || 'units'})
+              </>
+            ) : nextUnit ? (
+              <>
+                Submit &amp; start {unitNoun} #{nextUnit.sequence} <i className="fas fa-arrow-right" />
+              </>
+            ) : units.length ? (
+              <>
+                <i className="fas fa-check" /> Submit &amp; finish
               </>
             ) : (
               <>
