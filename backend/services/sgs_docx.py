@@ -213,6 +213,24 @@ def place_grid_photo(cell, path, box):
     return True
 
 
+def load_test_sentence(checkpoint, answer):
+    """One load test as a sentence, or None when it was not answered.
+
+    "Rated capacity load test at 100%" + Satisfactory ->
+    "Rated capacity load test at 100% and found satisfactory."
+    """
+    value = (answer or {}).get("value")
+    if not value:
+        return None
+    if value in ("not_applicable", "not_performed"):
+        sentence = f"{checkpoint.report_phrase} - not applicable."
+    else:
+        result = (answer.get("report_text") or answer.get("short") or str(value)).strip().rstrip(".")
+        sentence = f"{checkpoint.report_phrase} and found {result.lower()}."
+    remarks = (answer.get("remarks") or "").strip()
+    return f"{sentence} {remarks}" if remarks else sentence
+
+
 # Headings that must always open a fresh page.
 NEW_PAGE_HEADINGS = {"INSPECTION FINDINGS", "PHOTOGRAPHIC PRESENTATION"}
 
@@ -259,6 +277,53 @@ def set_labelled(paragraph, value):
         new_run.text = " " + value
         new_run.bold = False
     return True
+
+
+def finding_lines(value):
+    """A findings answer as a list of bullet lines (one per line typed)."""
+    if isinstance(value, (list, tuple)):
+        lines = value
+    else:
+        lines = str(value or "").splitlines()
+    cleaned = []
+    for line in lines:
+        line = str(line).strip().lstrip("•-*").strip()
+        if line:
+            cleaned.append(line)
+    return cleaned
+
+
+def write_bullets_after(paragraph, lines):
+    """Write each line as a bullet point on its own line under a heading.
+
+    The heading keeps only its label ("MAJOR FINDINGS:"); the bullets follow
+    it, one paragraph each, in Arial 10 with a hanging indent so wrapped text
+    lines up under the first word.
+    """
+    from docx.oxml import OxmlElement
+    from docx.shared import Mm, Pt
+    from docx.text.paragraph import Paragraph
+
+    set_labelled(paragraph, "")
+    anchor = paragraph._p
+    for line in lines:
+        p = OxmlElement("w:p")
+        anchor.addnext(p)
+        anchor = p
+        bullet = Paragraph(p, paragraph._parent)
+        fmt = bullet.paragraph_format
+        fmt.left_indent = Mm(10)
+        fmt.first_line_indent = Mm(-5)
+        fmt.space_before = Pt(0)
+        fmt.space_after = Pt(2)
+        fmt.tab_stops.add_tab_stop(Mm(10))
+        run = bullet.add_run("•	" + line)
+        run.font.name = "Arial"
+        run.font.size = Pt(10)
+        run.bold = False
+    if lines:
+        # A little air between the last bullet and the next heading.
+        Paragraph(anchor, paragraph._parent).paragraph_format.space_after = Pt(6)
 
 
 def _drop_following_lines(paragraph):
@@ -889,8 +954,13 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
         rows = {r["key"]: r for r in (unit_sections.get(load_section.key) or {}).get("rows") or []}
         dropdowns = [cp for cp in load_section.checkpoints if cp.kind == "dropdown"]
         for row, checkpoint in zip(tables["load_test"].rows[1:], dropdowns):
-            if len(row.cells) >= 2:
-                set_cell(row.cells[1], _remark(rows.get(checkpoint.key, {})), like=row.cells[0])
+            if len(row.cells) < 2:
+                continue
+            answer = rows.get(checkpoint.key, {})
+            # The result column reads as a sentence where the module gives one:
+            # "Rated capacity load test at 100% and found satisfactory."
+            text = load_test_sentence(checkpoint, answer) if checkpoint.report_phrase else None
+            set_cell(row.cells[1], text or _remark(answer), like=row.cells[0])
 
     # --- next examination + conclusion -------------------------------------
     conclusion = {row["key"]: row for row in unit.get("conclusion") or []}
@@ -918,9 +988,11 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
     for paragraph in list(doc.paragraphs):
         upper = paragraph.text.strip().upper()
         if upper.startswith("MAJOR FINDINGS"):
-            set_labelled(paragraph, entry_text("major_findings"))
+            # Each line the inspector entered prints as its own bullet,
+            # starting on the line below the heading.
+            write_bullets_after(paragraph, finding_lines(entry_text("major_findings")))
         elif upper.startswith("MINOR FINDINGS"):
-            set_labelled(paragraph, entry_text("minor_findings"))
+            write_bullets_after(paragraph, finding_lines(entry_text("minor_findings")))
         elif upper.startswith("NEXT EXAMINATION"):
             set_labelled(paragraph, entry_text("next_examination_due"))
         elif upper.startswith("CONCLUSION") and ":" in paragraph.text:

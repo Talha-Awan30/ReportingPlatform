@@ -28,7 +28,8 @@ class Checkpoint:
 
     key: str
     label: str
-    # dropdown | text | textarea | number | date | checkbox | photo
+    # dropdown | text | textarea | bullets | number | date | checkbox | photo
+    # (bullets: one entry per line, stored as newline-separated text)
     kind: str = "dropdown"
     # For dropdowns: the DropdownList.key holding the approved options.
     options_key: str = "inspection_result"
@@ -42,6 +43,9 @@ class Checkpoint:
     # Word output: False prints the option's short label ("Satisfactory"),
     # True prints its full approved clause. Check-point cells want the label.
     use_report_text: bool = False
+    # Word output for a check point printed as a sentence rather than a table
+    # cell, e.g. "Rated capacity load test at 100%" -> "... and found satisfactory."
+    report_phrase: str = ""
 
     def to_dict(self):
         return {
@@ -75,6 +79,8 @@ class PhotoSlot:
     # When set, the image is dropped into the title-page table row whose first
     # cell reads this text (e.g. "QR Code") instead of into a picture frame.
     cell_label: str = ""
+    # Uploaded by the back office, never by the inspector (e.g. the QR code).
+    back_office: bool = False
 
     def to_dict(self):
         return {
@@ -83,6 +89,7 @@ class PhotoSlot:
             "required": self.required,
             "help_text": self.help_text,
             "cell_label": self.cell_label,
+            "back_office": self.back_office,
         }
 
 

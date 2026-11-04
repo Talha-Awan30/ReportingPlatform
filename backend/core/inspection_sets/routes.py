@@ -60,6 +60,14 @@ def _load(set_id):
     return record
 
 
+def _assert_slot_allowed(record, slot_key):
+    """Back-office slots (the QR code) are not the inspector's to change."""
+    spec = get_module(record.module_slug)
+    slot = next((s for s in (spec.title_page_photos if spec else []) if s.key == slot_key), None)
+    if slot is not None and slot.back_office and current_user().role is not Role.ADMIN:
+        raise ApiError(f"The {slot.label} is added by the back office.", 403, "forbidden")
+
+
 def _assert_editable(record):
     """The shared half stays editable while any unit is still a draft."""
     user = current_user()
@@ -67,6 +75,11 @@ def _assert_editable(record):
         raise ApiError("Clients cannot edit inspection sets.", 403, "forbidden")
     if user.role is Role.INSPECTOR and record.created_by_id != user.id:
         raise ApiError("You can only edit sets you created.", 403, "forbidden")
+    # A reviewer may correct the title page while the visit waits for review.
+    if user.role in (Role.REVIEWER, Role.ADMIN) and any(
+        r.status is ReportStatus.SUBMITTED for r in record.reports
+    ):
+        return
     if record.reports and all(not r.is_editable for r in record.reports):
         raise ApiError(
             "Every unit in this set has been submitted, so the title page is locked.",
@@ -259,6 +272,7 @@ def upload_set_photos(set_id):
     slot_key = request.form.get("slot_key")
     if not slot_key:
         raise ApiError("'slot_key' is required.", 422, "validation_error")
+    _assert_slot_allowed(record, slot_key)
 
     files = request.files.getlist("files") or request.files.getlist("file")
     if not files:
@@ -307,6 +321,7 @@ def delete_set_photo(set_id, photo_id):
     _assert_editable(record)
 
     photo = InspectionSetPhoto.query.filter_by(id=photo_id, inspection_set_id=set_id).first_or_404()
+    _assert_slot_allowed(record, photo.slot_key)
     delete_set_photo_file(photo)
     db.session.delete(photo)
     db.session.commit()
@@ -510,6 +525,47 @@ def return_set(set_id):
     db.session.commit()
 
     return {"set": record.to_dict(), "message": f"{record.set_number} returned to the inspector."}
+
+
+@bp.post("/<int:set_id>/review-edit")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def save_review_edit_set(set_id):
+    """Save the reviewer's edits to a visit as the next revision of every unit."""
+    from core.reports.routes import build_set_documents, revise
+
+    record = _load_for_review(set_id)
+    spec = get_module(record.module_slug)
+    data = request.get_json(silent=True) or {}
+    note = (data.get("note") or "").strip()
+    user = current_user()
+
+    units = [r for r in record.reports if r.status is ReportStatus.SUBMITTED]
+    for report in units:
+        revise(report, spec, user, note)
+    db.session.flush()
+    try:
+        build_set_documents(record, spec)
+    except Exception:  # noqa: BLE001 - never lose the edit over the document
+        import logging
+
+        logging.getLogger(__name__).exception("Could not rebuild the combined report for set %s", record.set_number)
+    db.session.commit()
+    revision = max((r.revision for r in record.reports), default=0)
+    return {"set": record.to_dict(detail=True), "message": f"{record.set_number} saved as Rev {revision}."}
+
+
+@bp.post("/<int:set_id>/review-edit/discard")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def discard_review_edit_set(set_id):
+    """Drop the reviewer's unsaved edits - back to the revision under review."""
+    from core.reports.routes import discard_review_edits
+
+    record = _load_for_review(set_id)
+    for report in record.reports:
+        if report.status is ReportStatus.SUBMITTED:
+            discard_review_edits(report)
+    db.session.commit()
+    return {"set": record.to_dict(detail=True), "message": "Your edits were discarded."}
 
 
 # -------------------------------------------------------------------- helpers

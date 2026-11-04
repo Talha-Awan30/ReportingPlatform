@@ -32,6 +32,35 @@ ADMIN_PASSWORD = "123"
 ADMIN_EMAIL = "admin@sgs.com"
 ADMIN_NAME = "Administrator"
 
+# Option lists that one module uses instead of the global list of the same key.
+# The elevator report answers check points 1-9 and the load tests differently
+# from the other modules, so it carries its own wording.
+MODULE_LISTS = [
+    {
+        "module_slug": "elevator_inspection",
+        "key": "inspection_result",
+        "name": "Elevator Inspection Result",
+        "description": "Answer to every elevator check point, sections 1-9.",
+        "options": [
+            ("satisfactory", "Satisfactory", "Found satisfactory at the time of inspection.", "success", True),
+            ("unsatisfactory", "Unsatisfactory", "Found unsatisfactory; see the remarks.", "danger", False),
+            ("not_applicable", "Not Applicable", "Not applicable to this elevator.", "neutral", False),
+            ("not_installed", "Not Installed", "Not installed on this elevator.", "info", False),
+        ],
+    },
+    {
+        "module_slug": "elevator_inspection",
+        "key": "load_test_result",
+        "name": "Elevator Load Test Result",
+        "description": "Outcome of the section 10 load tests.",
+        "options": [
+            ("satisfactory", "Satisfactory", "satisfactory", "success", True),
+            ("unsatisfactory", "Not Satisfactory", "not satisfactory", "danger", False),
+            ("not_applicable", "Not Applicable", "not applicable", "neutral", False),
+        ],
+    },
+]
+
 # Global option lists - available to every module unless a module overrides them.
 GLOBAL_LISTS = [
     {
@@ -125,11 +154,15 @@ def _seed_admin():
 
 
 def _seed_dropdowns():
-    for entry in GLOBAL_LISTS:
-        dropdown = DropdownList.query.filter_by(key=entry["key"], module_slug=None).first()
+    for entry in GLOBAL_LISTS + MODULE_LISTS:
+        module_slug = entry.get("module_slug")
+        dropdown = DropdownList.query.filter_by(key=entry["key"], module_slug=module_slug).first()
         if dropdown is None:
             dropdown = DropdownList(
-                key=entry["key"], name=entry["name"], description=entry["description"]
+                key=entry["key"],
+                name=entry["name"],
+                description=entry["description"],
+                module_slug=module_slug,
             )
             db.session.add(dropdown)
             db.session.flush()

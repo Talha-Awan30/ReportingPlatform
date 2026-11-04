@@ -18,8 +18,8 @@ so approved phrasing is edited in Admin, not here.
 """
 from modules.base import Checkpoint, ModuleSpec, PhotoSlot, Section
 
-RESULT = "inspection_result"      # Satisfactory / Defect / Not Applicable
-LOAD_RESULT = "load_test_result"  # Pass / Fail / Not Performed
+RESULT = "inspection_result"      # Satisfactory / Unsatisfactory / Not Applicable / Not Installed
+LOAD_RESULT = "load_test_result"  # Satisfactory / Not Satisfactory / Not Applicable
 CONCLUSION = "overall_result"     # Satisfactory / Unsatisfactory / Conditional
 
 
@@ -58,7 +58,7 @@ TITLE_PAGE_PHOTOS = [
               help_text="Left picture on the title page. Shared by every elevator in this visit."),
     PhotoSlot("site_photo", "Site photograph",
               help_text="Right picture on the title page."),
-    PhotoSlot("qr_code", "QR Code", cell_label="QR Code",
+    PhotoSlot("qr_code", "QR Code", cell_label="QR Code", back_office=True,
               help_text="Dropped into the QR Code row on the cover page."),
 ]
 
@@ -99,15 +99,15 @@ PHOTO_SLOTS = [
 # FINDINGS & CONCLUSION - closes each elevator's report.
 # ---------------------------------------------------------------------------
 CONCLUSION_FIELDS = [
-    Checkpoint(key="major_findings", label="MAJOR FINDINGS", kind="textarea",
+    # One finding per line; each line prints as a bullet point in the report.
+    Checkpoint(key="major_findings", label="MAJOR FINDINGS", kind="bullets",
                options_key="", required=False),
-    Checkpoint(key="minor_findings", label="MINOR FINDINGS (Area of Improvement)",
-               kind="textarea", options_key="", required=False),
+    Checkpoint(key="minor_findings", label="MINOR FINDINGS", kind="bullets",
+               options_key="", required=False),
     Checkpoint(key="next_examination_due", label="Next Examination Due on", kind="date",
                options_key=""),
     Checkpoint(key="conclusion", label="Conclusion", kind="dropdown", options_key=CONCLUSION,
                use_report_text=True),
-    _text("inspector_signature_name", "Inspected by", required=False),
 ]
 
 
@@ -296,7 +296,8 @@ MODULE = ModuleSpec(
             checkpoints=[
                 Checkpoint(
                     key="rated_capacity_test",
-                    label="10.1 Rated capacity load test (100%)",
+                    report_phrase="Rated capacity load test at 100%",
+                    label="Rated capacity load test (100%)",
                     kind="dropdown",
                     options_key=LOAD_RESULT,
                     help_text="Brake performance, levelling accuracy, abnormal noise and vibration.",
@@ -304,7 +305,8 @@ MODULE = ModuleSpec(
                 ),
                 Checkpoint(
                     key="proof_load_test",
-                    label="10.2 Proof load test (110%)",
+                    report_phrase="Proof load test at 110%",
+                    label="Proof load test (110%)",
                     kind="dropdown",
                     options_key=LOAD_RESULT,
                     help_text="Brake performance, levelling accuracy, abnormal noise and vibration.",
@@ -312,17 +314,12 @@ MODULE = ModuleSpec(
                 ),
                 Checkpoint(
                     key="brake_performance_test",
-                    label="10.3 Brake performance test (125%)",
+                    report_phrase="Brake performance test with 125%",
+                    label="Brake performance test (125%)",
                     kind="dropdown",
                     options_key=LOAD_RESULT,
                     help_text="Load held 8-10 minutes; the car must not move, slip or change level.",
                     allows_photos=True,
-                ),
-                Checkpoint(
-                    key="test_weights_used",
-                    label="Calibrated test weights used",
-                    kind="text",
-                    required=False,
                 ),
             ],
         ),

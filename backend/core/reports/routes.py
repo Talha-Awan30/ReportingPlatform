@@ -62,8 +62,15 @@ def _load(report_id):
     return report
 
 
+def reviewer_may_edit(report, user):
+    """A reviewer may correct a report while it is waiting for their review."""
+    return user.role in (Role.REVIEWER, Role.ADMIN) and report.status is ReportStatus.SUBMITTED
+
+
 def _assert_can_edit(report):
     user = current_user()
+    if reviewer_may_edit(report, user):
+        return
     if not report.is_editable:
         raise ApiError(
             f"This report is {report.status.label.lower()} and can no longer be edited.",
@@ -89,6 +96,12 @@ def list_reports():
     query = _visible_reports()
     group = request.args.get("group_visits") in ("1", "true")
     unit = aliased(Report)
+
+    # A reviewer's report list is the final record only: approved reports.
+    # Work still waiting on them lives in the review queue instead.
+    user = current_user()
+    if user.role is Role.REVIEWER:
+        query = query.filter(Report.status.in_(CLIENT_VISIBLE))
 
     if module_slug := request.args.get("module_slug"):
         query = query.filter(Report.module_slug == module_slug)
@@ -440,6 +453,8 @@ def submit_report(report_id):
                 message = (
                     f"Submitted. All {len(record.reports)} {spec.unit_noun_plural} are in - "
                     "the combined report has gone to the reviewer."
+                    if len(record.reports) > 1
+                    else "Submitted - the report has gone to the reviewer."
                 )
             except Exception:  # noqa: BLE001 - never block a submit on the document
                 import logging
@@ -850,6 +865,70 @@ def send_back(report, user, reason):
     report.reviewed_at = utcnow()
     report.log_event(ReportEventType.RETURNED, user, note=reason, meta={"revision": report.revision})
     revisions.mark_outcome(report, "returned", user, reason)
+
+
+def revise(report, spec, user, note=None):
+    """Save a reviewer's edits as the report's next revision.
+
+    The revision under review is closed as "revised", the number moves on, and
+    the documents are rebuilt - the report stays in the review queue.
+    """
+    revisions.mark_outcome(report, "revised", user, note or None)
+    report.revision += 1
+    report.reviewer_id = user.id
+    report.log_event(
+        ReportEventType.UPDATED,
+        user,
+        note=note or "Edited by the reviewer.",
+        meta={"revision": report.revision, "by_reviewer": True},
+    )
+    _generate(report, spec, user)
+    if report.inspection_set is None:
+        _build_pdf(report)
+    row = revisions.snapshot(report, user)
+    row.submitted_at = utcnow()
+
+
+def discard_review_edits(report):
+    """Put a report back to the revision under review, dropping unsaved edits."""
+    import copy
+
+    row = revisions.current(report)
+    if row is None:
+        return
+    report.data = copy.deepcopy(row.data or {})
+    record = report.inspection_set
+    if record is not None and row.title_page is not None:
+        record.title_page = copy.deepcopy(row.title_page)
+
+
+def _assert_reviewer_editing(report):
+    if not reviewer_may_edit(report, current_user()):
+        raise ApiError("Only a report waiting for review can be edited by the reviewer.", 409, "invalid_transition")
+
+
+@bp.post("/<int:report_id>/review-edit")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def save_review_edit(report_id):
+    """Save the reviewer's edits as the next revision (a single report)."""
+    report = _load(report_id)
+    _assert_reviewer_editing(report)
+    if report.inspection_set is not None:
+        raise ApiError("Save the visit as a whole.", 409, "use_set", {"set_id": report.inspection_set_id})
+    data = request.get_json(silent=True) or {}
+    revise(report, get_module(report.module_slug), current_user(), (data.get("note") or "").strip())
+    db.session.commit()
+    return {"report": report.to_dict(detail=True), "message": f"Saved as Rev {report.revision}."}
+
+
+@bp.post("/<int:report_id>/review-edit/discard")
+@roles_required(Role.REVIEWER, Role.ADMIN)
+def discard_review_edit(report_id):
+    report = _load(report_id)
+    _assert_reviewer_editing(report)
+    discard_review_edits(report)
+    db.session.commit()
+    return {"report": report.to_dict(detail=True), "message": "Your edits were discarded."}
 
 
 def set_ready_for_review(record):
