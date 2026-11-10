@@ -50,6 +50,11 @@ def _visible_sets():
         )
     if user.role is Role.INSPECTOR:
         return query.filter(InspectionSet.created_by_id == user.id)
+    if user.role is Role.BACK_OFFICE:
+        # Only visits the reviewer has approved.
+        from core.reports.routes import CLIENT_VISIBLE
+
+        return query.filter(InspectionSet.reports.any(Report.status.in_(CLIENT_VISIBLE)))
     return query
 
 
@@ -60,12 +65,48 @@ def _load(set_id):
     return record
 
 
-def _assert_slot_allowed(record, slot_key):
-    """Back-office slots (the QR code) are not the inspector's to change."""
+def _slot(record, slot_key):
     spec = get_module(record.module_slug)
-    slot = next((s for s in (spec.title_page_photos if spec else []) if s.key == slot_key), None)
-    if slot is not None and slot.back_office and current_user().role is not Role.ADMIN:
+    return next((s for s in (spec.title_page_photos if spec else []) if s.key == slot_key), None)
+
+
+def _assert_slot_allowed(record, slot_key):
+    """Back-office slots (the QR code) are not the inspector's to change, and
+    the back office may change nothing else."""
+    slot = _slot(record, slot_key)
+    role = current_user().role
+    if slot is not None and slot.back_office and role not in (Role.ADMIN, Role.BACK_OFFICE):
         raise ApiError(f"The {slot.label} is added by the back office.", 403, "forbidden")
+    if role is Role.BACK_OFFICE and not (slot is not None and slot.back_office):
+        raise ApiError("The back office can only add the QR code.", 403, "forbidden")
+
+
+def _assert_photo_editable(record, slot_key):
+    """A back-office picture goes on once the visit is approved - the title
+    page is locked by then, so the usual editable check does not apply."""
+    slot = _slot(record, slot_key)
+    if slot is not None and slot.back_office and current_user().role in (Role.ADMIN, Role.BACK_OFFICE):
+        return
+    _assert_editable(record)
+
+
+def _rebuild_after_back_office(record, slot_key):
+    """Rebuild the visit's Word and PDF so the downloads carry the new QR code."""
+    slot = _slot(record, slot_key)
+    if slot is None or not slot.back_office:
+        return
+    if not record.reports or any(r.status is ReportStatus.DRAFT for r in record.reports):
+        return
+    from core.reports.routes import build_set_documents
+
+    # The photo list was loaded before this upload/delete - read it afresh.
+    db.session.expire(record, ["photos"])
+    try:
+        build_set_documents(record, get_module(record.module_slug))
+    except Exception:  # noqa: BLE001 - the picture is saved either way
+        import logging
+
+        logging.getLogger(__name__).exception("Could not rebuild %s after a back-office upload", record.set_number)
 
 
 def _assert_editable(record):
@@ -264,15 +305,22 @@ def delete_set(set_id):
 
 # ---------------------------------------------------------- title page photos
 @bp.post("/<int:set_id>/photos")
-@roles_required(*STAFF)
+@roles_required(*STAFF, Role.BACK_OFFICE)
 def upload_set_photos(set_id):
     record = _load(set_id)
-    _assert_editable(record)
 
     slot_key = request.form.get("slot_key")
     if not slot_key:
         raise ApiError("'slot_key' is required.", 422, "validation_error")
     _assert_slot_allowed(record, slot_key)
+    _assert_photo_editable(record, slot_key)
+    slot = _slot(record, slot_key)
+    if slot is not None and slot.back_office:
+        # One QR code per visit: a new upload replaces the old one.
+        for old in record.photos_of(slot_key):
+            delete_set_photo_file(old)
+            db.session.delete(old)
+        db.session.flush()
 
     files = request.files.getlist("files") or request.files.getlist("file")
     if not files:
@@ -298,6 +346,8 @@ def upload_set_photos(set_id):
         db.session.add(photo)
         saved.append(photo)
 
+    db.session.flush()
+    _rebuild_after_back_office(record, slot_key)
     db.session.commit()
     return {"photos": [p.to_dict() for p in saved]}, 201
 
@@ -315,15 +365,18 @@ def serve_set_photo(set_id, photo_id):
 
 
 @bp.delete("/<int:set_id>/photos/<int:photo_id>")
-@roles_required(*STAFF)
+@roles_required(*STAFF, Role.BACK_OFFICE)
 def delete_set_photo(set_id, photo_id):
     record = _load(set_id)
-    _assert_editable(record)
 
     photo = InspectionSetPhoto.query.filter_by(id=photo_id, inspection_set_id=set_id).first_or_404()
-    _assert_slot_allowed(record, photo.slot_key)
+    slot_key = photo.slot_key
+    _assert_slot_allowed(record, slot_key)
+    _assert_photo_editable(record, slot_key)
     delete_set_photo_file(photo)
     db.session.delete(photo)
+    db.session.flush()
+    _rebuild_after_back_office(record, slot_key)
     db.session.commit()
     return {"message": "Photo removed."}
 
@@ -371,7 +424,7 @@ def download_set_document(set_id):
 
 
 @bp.get("/<int:set_id>/pdf")
-@roles_required(*STAFF)
+@roles_required(*STAFF, Role.BACK_OFFICE)
 def set_pdf(set_id):
     """The combined report as a PDF (inline, or ?download=1)."""
     record = _load(set_id)
@@ -495,6 +548,17 @@ def approve_set(set_id):
     approved = [r for r in record.reports if r.status is ReportStatus.SUBMITTED]
     for report in approved:
         approve(report, user, spec, data)
+    db.session.flush()
+    # The released visit document carries the reviewer's name - and is what
+    # the back office downloads and adds the QR code to.
+    from core.reports.routes import build_set_documents
+
+    try:
+        build_set_documents(record, spec)
+    except Exception:  # noqa: BLE001 - never block an approval on the document
+        import logging
+
+        logging.getLogger(__name__).exception("Could not rebuild %s after approval", record.set_number)
     db.session.commit()
 
     return {

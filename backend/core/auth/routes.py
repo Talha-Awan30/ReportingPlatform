@@ -1,5 +1,8 @@
 """Authentication - sign in, refresh, profile, password change."""
-from flask import Blueprint, request
+import mimetypes
+import os
+
+from flask import Blueprint, request, send_file
 from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
 
 from extensions import db
@@ -63,6 +66,44 @@ def update_me():
     user.update_from(data, ["full_name", "phone", "job_title"])
     db.session.commit()
     return {"user": user.to_dict()}
+
+
+# ---------------------------------------------------------------- signature
+@bp.get("/me/signature")
+def my_signature():
+    from services.storage import signature_path
+
+    path = signature_path(current_user())
+    if not path or not os.path.exists(path):
+        raise ApiError("No signature on your profile yet.", 404, "not_found")
+    return send_file(path, mimetype=mimetypes.guess_type(path)[0] or "image/png", max_age=0)
+
+
+@bp.post("/me/signature")
+def upload_my_signature():
+    """Add or replace the signature (with stamp) on your own profile."""
+    from services.storage import delete_signature_file, save_signature
+
+    user = current_user()
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        raise ApiError("Choose a picture of your signature.", 422, "file_required")
+    stored = save_signature(upload, user.id)
+    delete_signature_file(user)
+    user.signature_filename = stored["filename"]
+    db.session.commit()
+    return {"user": user.to_dict(), "message": "Signature saved."}
+
+
+@bp.delete("/me/signature")
+def delete_my_signature():
+    from services.storage import delete_signature_file
+
+    user = current_user()
+    delete_signature_file(user)
+    user.signature_filename = None
+    db.session.commit()
+    return {"user": user.to_dict(), "message": "Signature removed."}
 
 
 @bp.post("/change-password")

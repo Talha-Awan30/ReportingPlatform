@@ -124,6 +124,10 @@ def build_context(report, spec, options=None):
         {"key": slot.key, "label": slot.label, "photos": by_slot.get(slot.key, [])}
         for slot in (spec.photo_slots if spec else [])
     ]
+    cover_photos = [
+        {"key": slot.key, "label": slot.label, "photos": by_slot.get(slot.key, [])}
+        for slot in (spec.unit_cover_photos if spec else [])
+    ]
 
     return {
         "report_number": report.report_number,
@@ -156,6 +160,7 @@ def build_context(report, spec, options=None):
         "unit_details": unit_details,
         "conclusion": conclusion_rows,
         "photo_slots": photo_slots,
+        "cover_photos": cover_photos,
         "sections": sections,
         "front_page_photos": [_photo(p) for p in report.photos_of(PhotoKind.FRONT_PAGE)],
         "inspection_photos": [_photo(p) for p in report.photos_of(PhotoKind.INSPECTION)],
@@ -169,7 +174,7 @@ def _set_context(record, spec, options):
         "unit_count": len(record.reports),
         "unit_noun": spec.unit_noun if spec else "unit",
         "unit_noun_plural": spec.unit_noun_plural if spec else "units",
-        "title_page": _flatten(record.title_page or {}),
+        "title_page": with_signatories(_flatten(record.title_page or {}), record),
         "title_page_photos": [
             {
                 "slot": p.slot_key,
@@ -181,6 +186,32 @@ def _set_context(record, spec, options):
         "units": [build_context(r, spec, options) for r in record.reports],
         "generated_on": datetime.now().strftime("%d %B %Y"),
     }
+
+
+def with_signatories(values, record):
+    """Title-page values plus who signs the report.
+
+    Prepared by: the inspector's own signature (from their profile).
+    Reviewed by: blank until approval - then the approving reviewer's name,
+    designation and signature.
+    """
+    from models import ReportStatus
+    from services import sgs_docx
+    from services.storage import signature_path
+
+    values = dict(values)
+    reports = list(getattr(record, "reports", None) or [record])
+    preparer = next((r.inspector for r in reports if r.inspector), None) or getattr(
+        record, "created_by", None
+    )
+    values[sgs_docx.PREPARED_SIGNATURE] = signature_path(preparer) if preparer else None
+
+    released = (ReportStatus.APPROVED, ReportStatus.CLIENT_QUERY, ReportStatus.CLIENT_APPROVED)
+    reviewer = next((r.reviewer for r in reports if r.status in released and r.reviewer), None)
+    values["reviewed_by_name"] = reviewer.full_name if reviewer else ""
+    values["reviewed_by_designation"] = (reviewer.job_title or "") if reviewer else ""
+    values[sgs_docx.REVIEWED_SIGNATURE] = signature_path(reviewer) if reviewer else None
+    return values
 
 
 def _flatten(stored):
@@ -225,7 +256,7 @@ def generate(report, spec, options=None):
 def _title_page_of(report):
     """The shared cover values, when this report belongs to an inspection set."""
     record = getattr(report, "inspection_set", None)
-    return _flatten(record.title_page) if record else {}
+    return with_signatories(_flatten(record.title_page) if record else {}, record or report)
 
 
 def generate_set(record, spec, revision=None):

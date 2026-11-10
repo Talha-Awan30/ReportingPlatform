@@ -137,3 +137,31 @@ def delete_set_photo_file(photo):
         os.remove(set_photo_path(photo))
     except FileNotFoundError:
         pass
+
+
+# ------------------------------------------------------------ user signatures
+def signature_dir(user_id, create=True):
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], "signatures", str(user_id))
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def save_signature(file_storage, user_id):
+    """Persist a user's signature image and return its metadata."""
+    return _store_image(file_storage, signature_dir(user_id))
+
+
+def signature_path(user):
+    if not user.signature_filename:
+        return None
+    return os.path.join(signature_dir(user.id, create=False), user.signature_filename)
+
+
+def delete_signature_file(user):
+    path = signature_path(user)
+    if path:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass

@@ -7,7 +7,9 @@ from utils import roles_required
 from utils.errors import ApiError
 from utils.validation import require_fields
 
-bp = Blueprint("masterlists", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("masterlists", __name__))
 
 LIST_FIELDS = ["key", "name", "description", "module_slug", "is_active"]
 OPTION_FIELDS = ["value", "label", "report_text", "severity", "sort_order", "is_default", "is_active"]

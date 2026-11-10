@@ -9,7 +9,9 @@ from utils.decorators import current_user
 from utils.errors import ApiError
 from utils.validation import parse_date, parse_enum, require_fields
 
-bp = Blueprint("jobs", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("jobs", __name__))
 
 JOB_FIELDS = ["site_name", "site_address", "purchase_order", "notes", "contact_id", "team_lead_id"]
 

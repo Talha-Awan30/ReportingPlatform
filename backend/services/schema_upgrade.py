@@ -22,6 +22,7 @@ ADDED_COLUMNS = {
         ("sub_sector", "VARCHAR(120)"),
     ],
     "inspection_sets": [("pdf_path", "VARCHAR(500)")],
+    "users": [("signature_filename", "VARCHAR(255)")],
 }
 
 

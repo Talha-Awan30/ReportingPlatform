@@ -13,6 +13,8 @@ class Role(str, enum.Enum):
     INSPECTOR = "inspector"
     REVIEWER = "reviewer"
     CLIENT = "client"
+    # Sees only approved reports: adds the SGS QR code and downloads them.
+    BACK_OFFICE = "back_office"
 
     @property
     def label(self):
@@ -21,6 +23,7 @@ class Role(str, enum.Enum):
             Role.INSPECTOR: "Inspector",
             Role.REVIEWER: "Reviewer",
             Role.CLIENT: "Client",
+            Role.BACK_OFFICE: "Back Office",
         }[self]
 
 
@@ -32,6 +35,9 @@ class User(BaseModel):
     full_name = db.Column(db.String(150), nullable=False)
     phone = db.Column(db.String(50))
     job_title = db.Column(db.String(120))
+    # The signature (with stamp) the user keeps on their profile; a stored
+    # file name under UPLOAD_FOLDER/signatures/<user id>/.
+    signature_filename = db.Column(db.String(255))
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.Enum(Role), nullable=False, default=Role.INSPECTOR, index=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
@@ -64,4 +70,11 @@ class User(BaseModel):
         data["initial"] = self.initial
         data["role_label"] = self.role.label if self.role else None
         data["client_name"] = self.client.name if self.client else None
+        # The file name changes on every upload, so it doubles as a cache-buster.
+        data["signature_url"] = (
+            f"/api/auth/me/signature?v={self.signature_filename.split('.')[0][:8]}"
+            if self.signature_filename
+            else None
+        )
+        data.pop("signature_filename", None)
         return data

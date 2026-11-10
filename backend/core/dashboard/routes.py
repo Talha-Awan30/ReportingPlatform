@@ -9,7 +9,9 @@ from modules import all_modules
 from utils import roles_required
 from utils.decorators import current_user
 
-bp = Blueprint("dashboard", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("dashboard", __name__))
 
 
 def _scoped_reports():
@@ -23,8 +25,11 @@ def _scoped_reports():
 
 
 def _scoped_equipment():
+    from services.finality import equipment_is_final
+
     user = current_user()
-    query = Equipment.query.filter(Equipment.is_active.is_(True))
+    # Final equipment only: an approved report with the back office's QR code.
+    query = Equipment.query.filter(Equipment.is_active.is_(True), equipment_is_final())
     if user.role is Role.CLIENT:
         query = query.filter(Equipment.client_id == user.client_id)
     return query

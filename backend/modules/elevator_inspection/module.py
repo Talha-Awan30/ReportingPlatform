@@ -21,6 +21,7 @@ from modules.base import Checkpoint, ModuleSpec, PhotoSlot, Section
 RESULT = "inspection_result"      # Satisfactory / Unsatisfactory / Not Applicable / Not Installed
 LOAD_RESULT = "load_test_result"  # Satisfactory / Not Satisfactory / Not Applicable
 CONCLUSION = "overall_result"     # Satisfactory / Unsatisfactory / Conditional
+LIFT_TYPE = "elevator_type"       # Passenger Lift / Cargo Lift - also names the report header
 
 
 def _cp(key, label, **kw):
@@ -38,19 +39,20 @@ def _text(key, label, **kw):
 # ---------------------------------------------------------------------------
 TITLE_PAGE = [
     _text("report_title", "Report title",
-          default="Third Party Inspection of Passenger Elevator"),
+          default="Third Party Inspection of Elevator"),
     _text("client", "Client"),
     _text("client_ref", "Client Ref", required=False),
     _text("client_contact_person", "Client Contact Person", required=False),
     _text("sgs_ref_no", "SGS Ref. No."),
+    # Inspected by / Prepared by start as the signed-in inspector (editable).
     _text("inspected_by", "Inspected by"),
     _text("site", "Site"),
     _text("equipment_identification", "Equipment Identification"),
     Checkpoint(key="survey_date", label="Survey Date", kind="date", options_key=""),
     _text("prepared_by_name", "Prepared by - name"),
     _text("prepared_by_designation", "Prepared by - designation"),
-    _text("reviewed_by_name", "Reviewed by - name", required=False),
-    _text("reviewed_by_designation", "Reviewed by - designation", required=False),
+    # Reviewed by is not typed: on approval the approving reviewer's name,
+    # designation and signature are printed.
 ]
 
 TITLE_PAGE_PHOTOS = [
@@ -76,9 +78,9 @@ UNIT_DETAILS = [
     _text("location", "Location"),
     Checkpoint(key="inspection_date", label="Inspection Date", kind="date", options_key=""),
     Checkpoint(key="status", label="Status", kind="dropdown", options_key=CONCLUSION),
-    _text("type", "Type", required=False),
+    Checkpoint(key="type", label="Type", kind="dropdown", options_key=LIFT_TYPE, required=False),
     Checkpoint(key="levels", label="Levels", kind="number", options_key=""),
-    _text("reference_code", "Reference Code For Inspection"),
+    _text("reference_code", "Reference Code For Inspection", default="ASME A-17.1 / A-17.2 / EN-81"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,13 @@ UNIT_DETAILS = [
 # From "Elevator Report Format.docx", table 14.
 # ---------------------------------------------------------------------------
 # All optional - an inspector may not be able to reach every area on a visit.
+# Two pictures side by side on each lift's first page, above
+# "Examination Report Of ...".
+UNIT_COVER_PHOTOS = [
+    PhotoSlot("unit_photo_1", "Picture 1"),
+    PhotoSlot("unit_photo_2", "Picture 2"),
+]
+
 PHOTO_SLOTS = [
     PhotoSlot("cabin", "Cabin"),
     PhotoSlot("machine_room", "Machine Room"),
@@ -139,14 +148,14 @@ MODULE = ModuleSpec(
     unit_details=UNIT_DETAILS,
 
     # Typed once, carried to every lift on the visit. Identification, serial
-    # number, levels and status stay per-lift because they genuinely differ.
+    # number, type, levels and status stay per-lift: the inspector picks them
+    # for each lift (type also titles that lift's report header).
     shared_unit_fields=[
         "name_of_client",
         "make",
         "model",
         "capacity",
         "location",
-        "type",
         "inspection_date",
         "reference_code",
     ],
@@ -155,6 +164,7 @@ MODULE = ModuleSpec(
         "survey_date": "inspection_date",
     },
     photo_slots=PHOTO_SLOTS,
+    unit_cover_photos=UNIT_COVER_PHOTOS,
     conclusion=CONCLUSION_FIELDS,
 
     sections=[

@@ -213,6 +213,213 @@ def place_grid_photo(cell, path, box):
     return True
 
 
+def picture_box_size(table):
+    """One picture size (EMU) that fits every cell of a plain picture table -
+    no caption row, just the picture, so it takes the whole cell."""
+    tbl_pr = table._tbl.tblPr
+    margins = 108 + 108
+    if tbl_pr is not None:
+        mar = tbl_pr.find(qn("w:tblCellMar"))
+        if mar is not None:
+            margins = sum(
+                int(side.get(qn("w:w"), 0))
+                for side in mar
+                if side.tag in (qn("w:left"), qn("w:right"), qn("w:start"), qn("w:end"))
+            )
+    widths = [int(c.get(qn("w:w"))) for c in table._tbl.tblGrid.findall(qn("w:gridCol"))]
+    heights = []
+    for row in table.rows:
+        tr_h = row._tr.find("./" + qn("w:trPr") + "/" + qn("w:trHeight"))
+        if tr_h is not None and tr_h.get(qn("w:val")):
+            heights.append(int(tr_h.get(qn("w:val"))))
+    width = min(widths or [4900]) - margins - PHOTO_PAD_TWIPS
+    height = min(heights or [4900]) - PHOTO_PAD_TWIPS
+    return width * 635, height * 635
+
+
+def place_cell_picture(cell, path, box):
+    """Fill a picture cell: cropped to exactly `box`, centred both ways."""
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    if not path or not os.path.exists(path):
+        return False
+    width, height = box
+    try:
+        stream = _image_stream(path, aspect=width / height)
+    except Exception:  # noqa: BLE001 - a bad image must not lose the report
+        log.exception("Could not read photograph %s", path)
+        return False
+
+    paragraph = cell.paragraphs[0]
+    for run in list(paragraph.runs):
+        run._r.getparent().remove(run._r)
+    fmt = paragraph.paragraph_format
+    fmt.space_before = fmt.space_after = 0
+    fmt.line_spacing = 1.0
+    fmt.left_indent = fmt.right_indent = fmt.first_line_indent = 0
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    paragraph.add_run().add_picture(stream, width=width, height=height)
+    return True
+
+
+# ------------------------------------------------------------- signatures
+def _signature_picture(paragraph, path, max_width, max_height):
+    """Add a signature image to `paragraph`, scaled (never cropped) to fit
+    max_width x max_height EMU. Returns the run's inline element, or None."""
+    import io
+
+    from PIL import Image
+
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        image = Image.open(path)
+        image.load()
+        image = _trim_blank_border(image.convert("RGBA"))
+        stream = io.BytesIO()
+        image.save(stream, "PNG")
+        stream.seek(0)
+    except Exception:  # noqa: BLE001 - a bad image must not lose the report
+        log.exception("Could not read signature %s", path)
+        return None
+
+    ratio = min(max_width / image.width, max_height / image.height)
+    width, height = int(image.width * ratio), int(image.height * ratio)
+    run = paragraph.add_run()
+    run.add_picture(stream, width=width, height=height)
+    return run._r.find(".//" + qn("wp:inline"))
+
+
+def _trim_blank_border(image, pad=6):
+    """Cut the empty margin (white or transparent) around a scanned signature,
+    so the ink - not the paper - is what gets scaled to the box."""
+    from PIL import Image
+
+    rgb = image.convert("RGB")
+    # Ink: anything visibly darker than paper, on a pixel that is not see-through.
+    dark = rgb.convert("L").point(lambda v: 255 if v < 225 else 0)
+    opaque = image.getchannel("A").point(lambda v: 255 if v > 40 else 0)
+    ink = Image.new("L", image.size, 0)
+    ink.paste(dark, mask=opaque)
+    box = ink.getbbox()
+    if not box:
+        return image
+    left, top, right, bottom = box
+    box = (max(left - pad, 0), max(top - pad, 0),
+           min(right + pad, image.width), min(bottom + pad, image.height))
+    return image.crop(box)
+
+
+def _float_inline(inline, align_h="right", offset_v=0):
+    """Turn an inline picture into one floating in front of the text, so it
+    takes no room: the box it sits in keeps its size."""
+    from lxml import etree
+
+    anchor = etree.Element(qn("wp:anchor"))
+    for name, value in (
+        ("distT", "0"), ("distB", "0"), ("distL", "0"), ("distR", "0"),
+        ("simplePos", "0"), ("relativeHeight", "251660288"), ("behindDoc", "0"),
+        ("locked", "0"), ("layoutInCell", "1"), ("allowOverlap", "1"),
+    ):
+        anchor.set(name, value)
+    simple = etree.SubElement(anchor, qn("wp:simplePos"))
+    simple.set("x", "0")
+    simple.set("y", "0")
+    pos_h = etree.SubElement(anchor, qn("wp:positionH"))
+    pos_h.set("relativeFrom", "column")
+    etree.SubElement(pos_h, qn("wp:align")).text = align_h
+    pos_v = etree.SubElement(anchor, qn("wp:positionV"))
+    pos_v.set("relativeFrom", "paragraph")
+    etree.SubElement(pos_v, qn("wp:posOffset")).text = str(int(offset_v))
+    for tag in ("wp:extent", "wp:effectExtent"):
+        node = inline.find(qn(tag))
+        if node is not None:
+            anchor.append(node)
+    etree.SubElement(anchor, qn("wp:wrapNone"))
+    for tag in ("wp:docPr", "wp:cNvGraphicFramePr"):
+        node = inline.find(qn(tag))
+        if node is not None:
+            anchor.append(node)
+    anchor.append(inline.find(qn("a:graphic")))
+    inline.addprevious(anchor)
+    inline.getparent().remove(inline)
+    return anchor
+
+
+def _row_height_emu(row, default_twips=600):
+    tr_h = row._tr.find("./" + qn("w:trPr") + "/" + qn("w:trHeight"))
+    twips = int(tr_h.get(qn("w:val"))) if tr_h is not None and tr_h.get(qn("w:val")) else default_twips
+    return twips * 635
+
+
+def _cell_width_emu(cell, default_twips=3000):
+    tc_w = cell._tc.find("./" + qn("w:tcPr") + "/" + qn("w:tcW"))
+    twips = int(tc_w.get(qn("w:w"))) if tc_w is not None and tc_w.get(qn("w:w")) else default_twips
+    return twips * 635
+
+
+def sign_box_beside_text(cell, row, path):
+    """A signature in the right part of a name box (the cover's Prepared by /
+    Reviewed by), floating so the box keeps exactly its size."""
+    from docx.shared import Mm
+
+    height = min(_row_height_emu(row) - Mm(2.5), Mm(13))
+    width = min(_cell_width_emu(cell) // 2, Mm(40))
+    inline = _signature_picture(cell.paragraphs[0], path, width, height)
+    if inline is not None:
+        _float_inline(inline, "right", Mm(0.5))
+
+
+def sign_cell(cell, row, path):
+    """A signature filling an empty signature cell, centred, row size kept."""
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Mm
+
+    paragraph = cell.paragraphs[0]
+    for run in list(paragraph.runs):
+        run._r.getparent().remove(run._r)
+    fmt = paragraph.paragraph_format
+    fmt.space_before = fmt.space_after = 0
+    fmt.line_spacing = 1.0
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    height = _row_height_emu(row) - Mm(1)
+    width = _cell_width_emu(cell) - Mm(4)
+    _signature_picture(paragraph, path, width, height)
+
+
+def sign_above(paragraph, path):
+    """The signature on the line above "SGS Pakistan (Private) Ltd.", lined up
+    with it. Uses the blank line already there, or adds one."""
+    import copy
+
+    from docx.shared import Mm
+    from docx.text.paragraph import Paragraph
+
+    if not path or not os.path.exists(path):
+        return
+    previous = paragraph._p.getprevious()
+    if previous is not None and previous.tag == qn("w:p") and _is_blank(previous):
+        target = Paragraph(previous, paragraph._parent)
+    else:
+        new_p = copy.deepcopy(paragraph._p)
+        for child in list(new_p):
+            if child.tag != qn("w:pPr"):
+                new_p.remove(child)
+        paragraph._p.addprevious(new_p)
+        target = Paragraph(new_p, paragraph._parent)
+    # Same indent as the company line, so the two sit one over the other.
+    target.paragraph_format.left_indent = paragraph.paragraph_format.left_indent
+    target.alignment = paragraph.alignment
+    target.paragraph_format.space_before = 0
+    target.paragraph_format.space_after = 0
+    target.paragraph_format.keep_with_next = True
+    _signature_picture(target, path, Mm(40), Mm(16))
+
+
 def load_test_sentence(checkpoint, answer):
     """One load test as a sentence, or None when it was not answered.
 
@@ -232,7 +439,12 @@ def load_test_sentence(checkpoint, answer):
 
 
 # Headings that must always open a fresh page.
-NEW_PAGE_HEADINGS = {"INSPECTION FINDINGS", "PHOTOGRAPHIC PRESENTATION"}
+NEW_PAGE_HEADINGS = {"INSPECTION FINDINGS", "MAJOR FINDINGS", "PHOTOGRAPHIC PRESENTATION"}
+
+# Keys the generator adds to the title-page values: the signature images of
+# whoever prepared the report and whoever approved it.
+PREPARED_SIGNATURE = "_prepared_signature"
+REVIEWED_SIGNATURE = "_reviewed_signature"
 
 
 def start_on_new_page(paragraph):
@@ -370,6 +582,16 @@ def find_tables(doc):
             found["particulars"] = table
         elif len(header) == 2 and lowered == "cabin":
             found["photos"] = table
+        elif (
+            len(header) == 2
+            and not any(header)
+            and len(table.rows) == 1
+            and "unit_photos" not in found
+            and "particulars" not in found
+            and not table._tbl.xpath(".//w:drawing")
+        ):
+            # Two empty boxes on the unit's first page: its two pictures.
+            found["unit_photos"] = table
         elif len(header) == 3 and lowered.startswith("next examination"):
             found["conclusion"] = table
         elif any(
@@ -564,6 +786,9 @@ def fill_title_page(doc_or_path, values, photos=None, spec=None):
                     set_cell_font(cell, "Arial", 10)
                     # The template aligns the two cells differently; match them.
                     cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                row_below = table.rows[index + 1]
+                sign_box_beside_text(target[0], row_below, values.get(PREPARED_SIGNATURE))
+                sign_box_beside_text(target[1], row_below, values.get(REVIEWED_SIGNATURE))
 
     frame_slots = [s for s in (spec.title_page_photos if spec else []) if not s.cell_label]
     apply_cover_photos(doc, frames, frame_slots, photo_by_slot, photos)
@@ -867,6 +1092,28 @@ def replace_cover_photos(doc, photos):
 
 
 # -------------------------------------------------------------- unit report
+def set_header_title(doc, title):
+    """Write the inspection name into the SGS / LEEA banner of every header.
+
+    The banner's middle column reads "INDUSTRIES & ENVIRONMENT" over the
+    inspection name; the cell ending in "Inspection" is the one replaced.
+    """
+    seen = set()
+    for section in doc.sections:
+        for header in (section.header, section.first_page_header, section.even_page_header):
+            if header.is_linked_to_previous or id(header.part) in seen:
+                continue
+            seen.add(id(header.part))
+            for table in header.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if _cell_text(cell).lower().endswith("inspection"):
+                            for paragraph in cell.paragraphs:
+                                if paragraph.text.strip():
+                                    set_text(paragraph, title)
+                                    break
+
+
 def fill_unit_report(doc_or_path, unit, spec, title_page=None):
     """Write one lift's answers onto the approved Examination Report."""
     doc = _as_doc(doc_or_path)
@@ -882,6 +1129,11 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
     site = title_page.get("site") or unit.get("site_name") or ""
     inspection_date = detail("inspection_date") or unit.get("inspection_date") or ""
     status = detail("status")
+
+    # --- the page header: "Passenger Lift Inspection" / "Cargo Lift Inspection"
+    lift_type = detail("type")
+    if lift_type:
+        set_header_title(doc, f"{lift_type} Inspection")
 
     # --- the cover paragraphs of the Examination Report ---------------------
     for paragraph in doc.paragraphs:
@@ -899,8 +1151,11 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
             set_text(paragraph, f"Client: {client_name}")
         elif "(Client Name)" in text or "(Site Location)" in text:
             replace_in_paragraph(paragraph, {"(Client Name)": client_name, "(Site Location)": site})
-        elif stripped.upper() in NEW_PAGE_HEADINGS:
+        elif stripped.upper().rstrip(":").strip() in NEW_PAGE_HEADINGS:
             start_on_new_page(paragraph)
+        elif stripped.upper().startswith("SGS PAKISTAN (PRIVATE)"):
+            # The closing sign-off: the preparer's signature just above it.
+            sign_above(paragraph, title_page.get(PREPARED_SIGNATURE))
 
     tables = find_tables(doc)
 
@@ -910,7 +1165,9 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
             if len(row.cells) < 2:
                 continue
             label = _cell_text(row.cells[0]).lower().rstrip(":")
-            if label == "name":
+            if label == "signature":
+                sign_cell(row.cells[1], row, title_page.get(PREPARED_SIGNATURE))
+            elif label == "name":
                 set_cell(row.cells[1], title_page.get("inspected_by") or unit.get("inspector_name", ""),
                          like=row.cells[0])
             elif label == "date":
@@ -1003,6 +1260,17 @@ def fill_unit_report(doc_or_path, unit, spec, title_page=None):
                 set_labelled(paragraph, chosen)
                 _drop_following_lines(paragraph)
 
+    # --- the two pictures on the unit's first page -------------------------
+    if "unit_photos" in tables and spec is not None and spec.unit_cover_photos:
+        table = tables["unit_photos"]
+        by_key = {slot["key"]: slot for slot in unit.get("cover_photos") or []}
+        box = picture_box_size(table)
+        lock_photo_rows(table)
+        for cell, slot in zip(table.rows[0].cells, spec.unit_cover_photos):
+            photos = (by_key.get(slot.key) or {}).get("photos") or []
+            if photos:
+                place_cell_picture(cell, photos[-1]["path"], box)
+
     # --- photographic presentation, into the existing grid -----------------
     if "photos" in tables:
         by_slot = {slot["key"]: slot for slot in unit.get("photo_slots") or []}
@@ -1031,12 +1299,17 @@ def compose(parts, out_path):
         raise ValueError("Nothing to compose")
 
     composer = Composer(parts[0])
-    # Where the first appended part begins - the end of the cover page.
-    boundary = len(composer.doc.element.body) - 1
+    body = composer.doc.element.body
+    # The first element of every appended part (the body's sectPr stays last,
+    # so new content lands just before it).
+    starts = []
     for part in parts[1:]:
+        boundary = len(body) - 1
         composer.append(part)
+        starts.append(body[boundary])
     if len(parts) > 1:
-        _carry_body_section(composer.doc, parts[1], boundary)
+        _carry_body_section(composer.doc, parts[1], starts[0])
+        _split_unit_sections(composer.doc, parts[1:], starts)
     composer.save(out_path)
     return out_path
 
@@ -1051,57 +1324,15 @@ def _is_blank(paragraph):
     )
 
 
-def _carry_body_section(doc, source, boundary):
-    """Give the report body its own section - and so its own header.
-
-    docxcompose keeps only the first document's section properties and drops
-    the header/footer references of everything appended, so without this the
-    whole report runs under the cover's (empty) header and the SGS / LEEA
-    banner never appears. The cover is closed with its own section break and
-    the body takes the report template's page setup, header and footer.
-    """
+def _linked_section(doc, source):
+    """A copy of `source`'s section properties, its header and footer parts
+    (and the logos inside them) re-homed into `doc`."""
     import copy
 
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     from docx.opc.packuri import PackURI
-    from docx.oxml import OxmlElement
 
-    body = doc.element.body
-    cover_sect = body.find(qn("w:sectPr"))
-    source_sect = source.element.body.find(qn("w:sectPr"))
-    if cover_sect is None or source_sect is None:
-        return
-
-    # 1. Close the cover with a section break carrying its own settings.
-    #    The cover's trailing blank paragraphs go first: on a full cover they
-    #    spill onto a page of their own and print as an empty extra page.
-    children = list(body)
-    first_body = children[boundary]
-    node = first_body.getprevious()
-    while node is not None and node.tag == qn("w:p") and _is_blank(node):
-        previous = node.getprevious()
-        body.remove(node)
-        node = previous
-
-    # The break itself rides on a 1pt paragraph, too small to need a page.
-    breaker = OxmlElement("w:p")
-    p_pr = breaker.get_or_add_pPr()
-    spacing = OxmlElement("w:spacing")
-    for attr, value in (("w:before", "0"), ("w:after", "0"), ("w:line", "20"), ("w:lineRule", "exact")):
-        spacing.set(qn(attr), value)
-    p_pr.append(spacing)
-    r_pr = OxmlElement("w:rPr")
-    for tag in ("w:sz", "w:szCs"):
-        size = OxmlElement(tag)
-        size.set(qn("w:val"), "2")
-        r_pr.append(size)
-    p_pr.append(r_pr)
-    p_pr.append(copy.deepcopy(cover_sect))
-    first_body.addprevious(breaker)
-
-    # 2. The body's section: the report template's own, with its header and
-    #    footer parts (and the logos inside them) carried across.
-    body_sect = copy.deepcopy(source_sect)
+    body_sect = copy.deepcopy(source.element.body.find(qn("w:sectPr")))
     used = {part.partname for part in doc.part.package.iter_parts()}
 
     def unique(partname):
@@ -1118,14 +1349,95 @@ def _carry_body_section(doc, source, boundary):
         if ref.tag not in (qn("w:headerReference"), qn("w:footerReference")):
             continue
         part = source.part.related_parts[ref.get(qn("r:id"))]
-        part.partname = unique(part.partname)
+        if part.partname in used:
+            part.partname = unique(part.partname)
+        else:
+            used.add(part.partname)
         for rel in part.rels.values():
-            if not rel.is_external:
+            if not rel.is_external and rel.target_part.partname in used:
                 rel.target_part.partname = unique(rel.target_part.partname)
+            elif not rel.is_external:
+                used.add(rel.target_part.partname)
         kind = RT.HEADER if ref.tag == qn("w:headerReference") else RT.FOOTER
         ref.set(qn("r:id"), doc.part.relate_to(part, kind))
+    return body_sect
 
-    body.replace(cover_sect, body_sect)
+
+def _section_break_paragraph(sect_pr):
+    """A 1pt paragraph carrying a section break - too small to need a page."""
+    from docx.oxml import OxmlElement
+
+    breaker = OxmlElement("w:p")
+    p_pr = breaker.get_or_add_pPr()
+    spacing = OxmlElement("w:spacing")
+    for attr, value in (("w:before", "0"), ("w:after", "0"), ("w:line", "20"), ("w:lineRule", "exact")):
+        spacing.set(qn(attr), value)
+    p_pr.append(spacing)
+    r_pr = OxmlElement("w:rPr")
+    for tag in ("w:sz", "w:szCs"):
+        size = OxmlElement(tag)
+        size.set(qn("w:val"), "2")
+        r_pr.append(size)
+    p_pr.append(r_pr)
+    p_pr.append(sect_pr)
+    return breaker
+
+
+def _split_unit_sections(doc, units, starts):
+    """Give every unit its own section, so each prints its own header.
+
+    Lifts on one visit can be different types - the banner of each one's pages
+    must read "Passenger Lift Inspection" or "Cargo Lift Inspection" for that
+    lift. Each unit but the last is closed with a section break carrying its
+    own header; the last unit uses the document's final section.
+    """
+    if len(units) < 2:
+        return
+    body = doc.element.body
+    for unit, next_start in zip(units[:-1], starts[1:]):
+        node = next_start.getprevious()
+        while node is not None and node.tag == qn("w:p") and _is_blank(node):
+            previous = node.getprevious()
+            body.remove(node)
+            node = previous
+        next_start.addprevious(_section_break_paragraph(_linked_section(doc, unit)))
+    final = body.find(qn("w:sectPr"))
+    if final is not None:
+        body.replace(final, _linked_section(doc, units[-1]))
+
+
+def _carry_body_section(doc, source, first_body):
+    """Give the report body its own section - and so its own header.
+
+    docxcompose keeps only the first document's section properties and drops
+    the header/footer references of everything appended, so without this the
+    whole report runs under the cover's (empty) header and the SGS / LEEA
+    banner never appears. The cover is closed with its own section break and
+    the body takes the report template's page setup, header and footer.
+    """
+    import copy
+
+    body = doc.element.body
+    cover_sect = body.find(qn("w:sectPr"))
+    source_sect = source.element.body.find(qn("w:sectPr"))
+    if cover_sect is None or source_sect is None:
+        return
+
+    # 1. Close the cover with a section break carrying its own settings.
+    #    The cover's trailing blank paragraphs go first: on a full cover they
+    #    spill onto a page of their own and print as an empty extra page.
+    node = first_body.getprevious()
+    while node is not None and node.tag == qn("w:p") and _is_blank(node):
+        previous = node.getprevious()
+        body.remove(node)
+        node = previous
+
+    # The break itself rides on a 1pt paragraph, too small to need a page.
+    first_body.addprevious(_section_break_paragraph(copy.deepcopy(cover_sect)))
+
+    # 2. The body's section: the report template's own, with its header and
+    #    footer parts (and the logos inside them) carried across.
+    body.replace(cover_sect, _linked_section(doc, source))
 
 
 # ------------------------------------------------------------------ helpers

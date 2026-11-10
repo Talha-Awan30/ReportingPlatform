@@ -60,3 +60,26 @@ def module_route(fn):
         return fn(*args, module_spec=spec, **kwargs)
 
     return wrapper
+
+
+def keep_out_back_office(blueprint):
+    """Close a whole blueprint to the back office.
+
+    The back office's only work is the approved reports list (adding the QR
+    code, downloading); registers, dashboards and alerts are none of its
+    business, even read-only.
+    """
+    from flask import request
+
+    @blueprint.before_request
+    def _block():
+        if request.method == "OPTIONS":
+            return None
+        verify_jwt_in_request(optional=True)
+        if get_jwt_identity() is None:
+            return None  # the view's own check answers 401
+        if current_user().role is Role.BACK_OFFICE:
+            raise ApiError("You do not have permission to perform this action.", 403, "forbidden")
+        return None
+
+    return blueprint

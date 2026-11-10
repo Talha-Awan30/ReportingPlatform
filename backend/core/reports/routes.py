@@ -47,6 +47,9 @@ def _visible_reports():
             query.join(Job, Report.job_id == Job.id)
             .filter(Job.client_id == user.client_id, Report.status.in_(CLIENT_VISIBLE))
         )
+    if user.role is Role.BACK_OFFICE:
+        # The back office works on released reports only.
+        return query.filter(Report.status.in_(CLIENT_VISIBLE))
     if user.role is Role.INSPECTOR:
         # Inspectors see their own work plus anything already released.
         return query.filter(
@@ -100,8 +103,13 @@ def list_reports():
     # A reviewer's report list is the final record only: approved reports.
     # Work still waiting on them lives in the review queue instead.
     user = current_user()
-    if user.role is Role.REVIEWER:
+    if user.role is Role.BACK_OFFICE:
         query = query.filter(Report.status.in_(CLIENT_VISIBLE))
+    elif user.role is Role.REVIEWER:
+        # Final means the back office has added the SGS QR code too.
+        from services.finality import is_final
+
+        query = query.filter(is_final())
 
     if module_slug := request.args.get("module_slug"):
         query = query.filter(Report.module_slug == module_slug)
@@ -197,6 +205,17 @@ def _with_visit_summary(report):
         "expires": min(
             (u.certificate_expiry_date for u in units if u.certificate_expiry_date), default=None
         ),
+        # Pictures only the back office adds (the SGS QR code), and whether
+        # each is in yet.
+        "back_office_slots": [
+            {
+                "key": slot.key,
+                "label": slot.label,
+                "photo": next((p.to_dict() for p in record.photos_of(slot.key)), None),
+            }
+            for slot in (spec.title_page_photos if spec else [])
+            if slot.back_office
+        ],
     }
     if data["visit"]["expires"]:
         data["visit"]["expires"] = data["visit"]["expires"].isoformat()
@@ -551,7 +570,7 @@ def report_revision_file(report_id, revision):
 
 
 @bp.get("/<int:report_id>/pdf")
-@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
+@roles_required(Role.INSPECTOR, Role.REVIEWER, Role.ADMIN, Role.BACK_OFFICE)
 def report_pdf(report_id):
     """The report as a PDF (inline, or ?download=1)."""
     report = _load(report_id)
@@ -1015,6 +1034,13 @@ def _apply_validity(report, spec, data):
         report.certificate_expiry_date = expiry
         return
 
+    # The inspector's "Next Examination Due on" is the expiry when given.
+    entry = (report.data or {}).get("next_examination_due") or {}
+    if due := _as_date(entry.get("value") if isinstance(entry, dict) else entry):
+        report.certificate_expiry_date = due
+        report.next_inspection_date = due
+        return
+
     if report.certificate_expiry_date:
         return
 
@@ -1031,6 +1057,17 @@ def _apply_validity(report, spec, data):
     # Approximate a month as 30 days - close enough for a renewal reminder.
     report.certificate_expiry_date = base + timedelta(days=months * 30)
     report.next_inspection_date = report.certificate_expiry_date
+
+
+def _as_date(value):
+    from datetime import date
+
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _sync_equipment_certification(report):

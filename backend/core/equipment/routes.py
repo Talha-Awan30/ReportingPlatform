@@ -8,7 +8,9 @@ from utils.decorators import current_user
 from utils.errors import ApiError
 from utils.validation import parse_date, require_fields
 
-bp = Blueprint("equipment", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("equipment", __name__))
 
 EQUIPMENT_FIELDS = [
     "tag_number",
@@ -74,7 +76,11 @@ def update_type(type_id):
 @bp.get("")
 @roles_required()
 def list_equipment():
-    query = _visible_equipment()
+    from services.finality import equipment_is_final
+
+    # The register lists final equipment only: an approved report whose
+    # visit has the back office's QR code.
+    query = _visible_equipment().filter(equipment_is_final())
 
     if client_id := request.args.get("client_id", type=int):
         query = query.filter(Equipment.client_id == client_id)
@@ -96,6 +102,14 @@ def list_equipment():
             )
         )
 
+    # Soonest expiry first; newly added equipment (latest expiry) falls to
+    # the bottom. Ties keep the order they were added in.
+    query = query.order_by(
+        Equipment.certificate_expiry_date.is_(None),
+        Equipment.certificate_expiry_date.asc(),
+        Equipment.id.asc(),
+    )
+
     # Certification filter drives the "due for renewal" views.
     if status := request.args.get("certification_status"):
         items = [e for e in query.all() if e.certification_status == status]
@@ -105,7 +119,7 @@ def list_equipment():
                      "has_next": False, "has_prev": False},
         }
 
-    return paginate(query.order_by(Equipment.tag_number))
+    return paginate(query)
 
 
 @bp.get("/<int:equipment_id>")

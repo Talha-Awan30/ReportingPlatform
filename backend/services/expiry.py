@@ -14,6 +14,7 @@ from datetime import date
 from flask import current_app
 
 from extensions import db
+from services.finality import equipment_is_final
 from models import Equipment, ExpiryAlert, Report, ReportStatus, Role, User
 from models.base import utcnow
 from services.mailer import send_mail
@@ -108,6 +109,8 @@ def scan_and_send(today=None, dry_run=False):
         Equipment.query.filter(
             Equipment.is_active.is_(True),
             Equipment.certificate_expiry_date.isnot(None),
+            # No reminders before the report is final (QR code uploaded).
+            equipment_is_final(),
         ).all()
     )
 

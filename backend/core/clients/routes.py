@@ -21,7 +21,9 @@ from utils.validation import require_fields
 
 log = logging.getLogger(__name__)
 
-bp = Blueprint("clients", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("clients", __name__))
 
 STAFF = (Role.INSPECTOR, Role.REVIEWER, Role.ADMIN)
 

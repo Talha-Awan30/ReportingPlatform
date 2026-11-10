@@ -6,14 +6,21 @@ from services import expiry
 from utils import paginate, roles_required
 from utils.decorators import current_user
 
-bp = Blueprint("alerts", __name__)
+from utils.decorators import keep_out_back_office  # noqa: E402
+
+bp = keep_out_back_office(Blueprint("alerts", __name__))
 
 
 @bp.get("")
 @roles_required()
 def list_alerts():
     user = current_user()
-    query = ExpiryAlert.query.join(Equipment, ExpiryAlert.equipment_id == Equipment.id)
+    from services.finality import equipment_is_final
+
+    # Alerts for final equipment only, as on the register.
+    query = ExpiryAlert.query.join(Equipment, ExpiryAlert.equipment_id == Equipment.id).filter(
+        equipment_is_final()
+    )
 
     if user.role is Role.CLIENT:
         query = query.filter(Equipment.client_id == user.client_id)

@@ -50,6 +50,16 @@ MODULE_LISTS = [
     },
     {
         "module_slug": "elevator_inspection",
+        "key": "elevator_type",
+        "name": "Elevator Type",
+        "description": "The kind of lift; it also titles the report header, e.g. 'Passenger Lift Inspection'.",
+        "options": [
+            ("passenger", "Passenger Lift", "Passenger Lift", "neutral", False),
+            ("cargo", "Cargo Lift", "Cargo Lift", "neutral", False),
+        ],
+    },
+    {
+        "module_slug": "elevator_inspection",
         "key": "load_test_result",
         "name": "Elevator Load Test Result",
         "description": "Outcome of the section 10 load tests.",

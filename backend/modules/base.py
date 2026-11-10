@@ -152,6 +152,9 @@ class ModuleSpec:
     unit_details: list = field(default_factory=list)
     # Named photo slots filled in for every unit.
     photo_slots: list = field(default_factory=list)
+    # Pictures on each unit's first page, side by side above its title
+    # (e.g. two views of the lift), separate from the photographic grid.
+    unit_cover_photos: list = field(default_factory=list)
     # Findings / conclusion fields that close each unit's report.
     conclusion: list = field(default_factory=list)
 
@@ -220,5 +223,6 @@ class ModuleSpec:
             data["title_page_photos"] = [p.to_dict() for p in self.title_page_photos]
             data["unit_details"] = [c.to_dict() for c in self.unit_details]
             data["photo_slots"] = [p.to_dict() for p in self.photo_slots]
+            data["unit_cover_photos"] = [p.to_dict() for p in self.unit_cover_photos]
             data["conclusion"] = [c.to_dict() for c in self.conclusion]
         return data
