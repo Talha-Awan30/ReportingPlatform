@@ -116,6 +116,7 @@ def main():
                 "data": {
                     "identification": {"value": f"LIFT-0{index}"},
                     "make": {"value": "Otis"},
+                    "inspection_date": {"value": "2026-11-10"},
                     "status": {"value": "satisfactory"},
                     "alarm_operation": {"value": "satisfactory"},
                     "conclusion": {"value": "satisfactory"},
@@ -128,12 +129,12 @@ def main():
             following = client.get(f"/api/reports/{lifts[1]['id']}", headers=auth).json["report"]
             check(
                 "shared particulars carry to the next lift",
-                following["prefill"].get("make", {}).get("value") == "Otis",
+                following["prefill"].get("inspection_date", {}).get("value") == "2026-11-10",
                 str(list(following["prefill"])),
             )
             check(
                 "the lift's own identity does not carry over",
-                "identification" not in following["prefill"],
+                not {"identification", "make", "model", "capacity", "location"} & set(following["prefill"]),
             )
         else:
             check(

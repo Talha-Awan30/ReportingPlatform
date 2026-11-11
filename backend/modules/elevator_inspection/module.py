@@ -147,15 +147,12 @@ MODULE = ModuleSpec(
     title_page_photos=TITLE_PAGE_PHOTOS,
     unit_details=UNIT_DETAILS,
 
-    # Typed once, carried to every lift on the visit. Identification, serial
-    # number, type, levels and status stay per-lift: the inspector picks them
-    # for each lift (type also titles that lift's report header).
+    # Typed once, carried to every lift on the visit. Everything that differs
+    # from lift to lift - identification, make, model, serial number,
+    # capacity, location, type, levels and status - the inspector fills for
+    # each one (type also titles that lift's report header).
     shared_unit_fields=[
         "name_of_client",
-        "make",
-        "model",
-        "capacity",
-        "location",
         "inspection_date",
         "reference_code",
     ],
